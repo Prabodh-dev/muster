@@ -85,6 +85,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
+			// Children must not outlive muster: stop them before quitting.
+			m.sup.Stop()
 			return m, tea.Quit
 		case "up", "k":
 			m.selectProc(m.selected - 1)

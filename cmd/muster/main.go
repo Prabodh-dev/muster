@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Prabodh-dev/muster/internal/config"
 	"github.com/Prabodh-dev/muster/internal/proc"
@@ -33,7 +35,19 @@ func run() error {
 	}
 
 	sup := proc.New(cfg)
+	// Covers every exit path, including the program being killed by a signal.
+	defer sup.Stop()
 	p := tea.NewProgram(tui.New(sup), tea.WithAltScreen(), tea.WithMouseCellMotion())
+
+	// Bubble Tea handles SIGINT/SIGTERM itself; a closed terminal sends
+	// SIGHUP, which would otherwise kill us and orphan the children.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		<-hup
+		p.Quit()
+	}()
+
 	_, err = p.Run()
 	return err
 }
