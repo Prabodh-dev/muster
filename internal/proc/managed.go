@@ -23,10 +23,12 @@ type managed struct {
 	quit     <-chan struct{}
 	cmds     chan command
 	finished chan struct{}
+	tm       timing
 }
 
-func newManaged(cfg config.Process, out chan<- Event, quit <-chan struct{}) *managed {
+func newManaged(cfg config.Process, out chan<- Event, quit <-chan struct{}, tm timing) *managed {
 	return &managed{
+		tm:       tm,
 		cfg:      cfg,
 		out:      out,
 		quit:     quit,
@@ -52,20 +54,78 @@ func (m *managed) grace() time.Duration {
 	return m.cfg.GracePeriod
 }
 
+// backoff is the delay before restart attempt n (1-based): base, 2*base,
+// 4*base, ... capped at backoffMax.
+func (t timing) backoff(n int) time.Duration {
+	d := t.backoffBase
+	for i := 1; i < n; i++ {
+		d *= 2
+		if d >= t.backoffMax {
+			return t.backoffMax
+		}
+	}
+	return min(d, t.backoffMax)
+}
+
+func (m *managed) wantsRestart(res exitInfo) bool {
+	switch m.cfg.Restart {
+	case config.RestartAlways:
+		return true
+	case config.RestartOnFailure:
+		return res.code != 0 || res.err != nil
+	default:
+		return false
+	}
+}
+
 func (m *managed) run() {
 	defer close(m.finished)
 
-	var inst *instance
-	restarts := 0
+	var (
+		inst      *instance
+		startedAt time.Time
+		launches  int
+		failures  int // consecutive automatic restarts without a stable run
+		retry     *time.Timer
+		retryC    <-chan time.Time
+	)
 
+	cancelRetry := func() {
+		if retry != nil {
+			retry.Stop()
+			retry, retryC = nil, nil
+		}
+	}
+	// exited reports a finished run and, per the restart policy, schedules
+	// the next one.
+	exited := func(res exitInfo, ran time.Duration) {
+		ev := ExitEvent{Proc: m.cfg.Name, Code: res.code, Err: res.err}
+		if m.wantsRestart(res) {
+			if ran >= m.tm.stableAfter {
+				failures = 0
+			}
+			failures++
+			if failures > m.cfg.MaxRestarts {
+				ev.GaveUp, ev.Max = true, m.cfg.MaxRestarts
+			} else {
+				ev.RetryIn = m.tm.backoff(failures)
+				ev.Attempt, ev.Max = failures, m.cfg.MaxRestarts
+				retry = time.NewTimer(ev.RetryIn)
+				retryC = retry.C
+			}
+		}
+		m.emit(ev)
+	}
 	start := func() {
 		var err error
 		inst, err = startInstance(m.cfg, m.out, m.quit, func(pid int) {
-			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: restarts})
+			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: max(launches-1, 0)})
 		})
+		launches++
+		startedAt = time.Now()
 		if err != nil {
 			inst = nil
-			m.emit(ExitEvent{Proc: m.cfg.Name, Code: -1, Err: err})
+			exited(exitInfo{code: -1, err: err}, 0)
 		}
 	}
 	// halt stops the running child at the user's request.
@@ -73,6 +133,12 @@ func (m *managed) run() {
 		inst.stop(m.grace())
 		m.emit(ExitEvent{Proc: m.cfg.Name, Code: inst.res.code, Stopped: true})
 		inst = nil
+	}
+	// fresh begins a new run on the user's initiative, forgetting past failures.
+	fresh := func() {
+		cancelRetry()
+		failures = 0
+		start()
 	}
 
 	start()
@@ -83,6 +149,7 @@ func (m *managed) run() {
 		}
 		select {
 		case <-m.quit:
+			cancelRetry()
 			if inst != nil {
 				inst.stop(m.grace())
 			}
@@ -93,23 +160,30 @@ func (m *managed) run() {
 			case cmdStop:
 				if inst != nil {
 					halt()
+				} else if retry != nil {
+					// Waiting to restart: the user wants it to stay down.
+					cancelRetry()
+					m.emit(ExitEvent{Proc: m.cfg.Name, Stopped: true})
 				}
 			case cmdStart:
 				if inst == nil {
-					start()
+					fresh()
 				}
 			case cmdRestart:
 				if inst != nil {
 					halt()
 				}
-				restarts++
-				start()
+				fresh()
 			}
 
 		case <-done:
 			res := inst.res
 			inst = nil
-			m.emit(ExitEvent{Proc: m.cfg.Name, Code: res.code, Err: res.err})
+			exited(res, time.Since(startedAt))
+
+		case <-retryC:
+			retry, retryC = nil, nil
+			start()
 		}
 	}
 }

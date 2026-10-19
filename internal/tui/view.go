@@ -26,6 +26,7 @@ var (
 	exitedDot  = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("○")
 	crashedDot = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("✗")
 	stoppedDot = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("■")
+	retryDot   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("↻")
 )
 
 func indicator(s proc.Status) string {
@@ -36,6 +37,8 @@ func indicator(s proc.Status) string {
 		return exitedDot
 	case proc.Stopped:
 		return stoppedDot
+	case proc.Restarting:
+		return retryDot
 	default:
 		return crashedDot
 	}
@@ -79,6 +82,9 @@ func renderView(m Model) string {
 		status = fmt.Sprintf("crashed (exit %d)", cur.Code)
 	}
 	header := headerStyle.Render(cur.Name) + helpStyle.Render("  "+status)
+	if cur.Restarts > 0 {
+		header += helpStyle.Render(fmt.Sprintf("  restarts: %d", cur.Restarts))
+	}
 	if d := cur.Dropped(); d > 0 {
 		header += helpStyle.Render(fmt.Sprintf("  (%d older lines dropped)", d))
 	}

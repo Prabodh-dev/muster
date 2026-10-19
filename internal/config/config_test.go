@@ -141,3 +141,42 @@ processes:
 		}
 	}
 }
+
+func TestRestartPolicy(t *testing.T) {
+	src := `
+processes:
+  a:
+    command: x
+  b:
+    command: y
+    restart: on-failure
+    max_restarts: 2
+  c:
+    command: z
+    restart: always
+    max_restarts: 0
+`
+	cfg, err := Parse([]byte(src), "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		policy RestartPolicy
+		max    int
+	}{{RestartNever, DefaultMaxRestarts}, {RestartOnFailure, 2}, {RestartAlways, 0}}
+	for i, w := range want {
+		p := cfg.Processes[i]
+		if p.Restart != w.policy || p.MaxRestarts != w.max {
+			t.Errorf("%s: got %q/%d, want %q/%d", p.Name, p.Restart, p.MaxRestarts, w.policy, w.max)
+		}
+	}
+
+	for _, bad := range []string{
+		"processes:\n  a:\n    command: x\n    restart: sometimes\n",
+		"processes:\n  a:\n    command: x\n    max_restarts: -1\n",
+	} {
+		if _, err := Parse([]byte(bad), "/x"); err == nil {
+			t.Errorf("expected error for %q", bad)
+		}
+	}
+}

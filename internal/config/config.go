@@ -26,6 +26,19 @@ const DefaultBufferLines = 5000
 // termination signal before it is force-killed.
 const DefaultGracePeriod = 5 * time.Second
 
+// RestartPolicy says when an exited process is relaunched automatically.
+type RestartPolicy string
+
+const (
+	RestartNever     RestartPolicy = "never"      // default
+	RestartOnFailure RestartPolicy = "on-failure" // only after a non-zero exit
+	RestartAlways    RestartPolicy = "always"     // after any exit
+)
+
+// DefaultMaxRestarts is how many consecutive automatic restarts are attempted
+// before giving up.
+const DefaultMaxRestarts = 5
+
 // Process describes one supervised process.
 type Process struct {
 	Name    string
@@ -36,6 +49,11 @@ type Process struct {
 	// GracePeriod is how long a stop waits for the process group to exit
 	// before force-killing it. Zero means kill immediately.
 	GracePeriod time.Duration
+
+	Restart RestartPolicy
+	// MaxRestarts caps consecutive automatic restarts; a run that stays up
+	// long enough resets the count.
+	MaxRestarts int
 }
 
 // Config is a parsed and validated muster.yaml.
@@ -55,6 +73,8 @@ type rawProcess struct {
 	Cwd                string            `yaml:"cwd"`
 	Env                map[string]string `yaml:"env"`
 	GracePeriodSeconds *float64          `yaml:"grace_period_seconds"`
+	Restart            string            `yaml:"restart"`
+	MaxRestarts        *int              `yaml:"max_restarts"`
 }
 
 // Load reads and parses the file at path. Relative cwd values are resolved
@@ -145,6 +165,21 @@ func Parse(data []byte, baseDir string) (*Config, error) {
 			}
 			procGrace = g
 		}
+		policy := RestartPolicy(rp.Restart)
+		switch policy {
+		case "":
+			policy = RestartNever
+		case RestartNever, RestartOnFailure, RestartAlways:
+		default:
+			return nil, fmt.Errorf("process %q: restart must be never, on-failure or always, got %q", name, rp.Restart)
+		}
+		maxRestarts := DefaultMaxRestarts
+		if rp.MaxRestarts != nil {
+			if *rp.MaxRestarts < 0 {
+				return nil, fmt.Errorf("process %q: max_restarts must not be negative, got %d", name, *rp.MaxRestarts)
+			}
+			maxRestarts = *rp.MaxRestarts
+		}
 		cwd := rp.Cwd
 		if cwd != "" && !filepath.IsAbs(cwd) {
 			cwd = filepath.Join(baseDir, cwd)
@@ -159,6 +194,8 @@ func Parse(data []byte, baseDir string) (*Config, error) {
 			Env:     rp.Env,
 
 			GracePeriod: procGrace,
+			Restart:     policy,
+			MaxRestarts: maxRestarts,
 		})
 	}
 	return cfg, nil
@@ -173,7 +210,7 @@ func graceDuration(seconds float64) (time.Duration, error) {
 
 func decodeStrict(n *yaml.Node, out any) error {
 	// Node.Decode has no KnownFields option, so check keys by hand.
-	allowed := map[string]bool{"command": true, "cwd": true, "env": true, "grace_period_seconds": true}
+	allowed := map[string]bool{"command": true, "cwd": true, "env": true, "grace_period_seconds": true, "restart": true, "max_restarts": true}
 	var unknown []string
 	for i := 0; i < len(n.Content); i += 2 {
 		if k := n.Content[i]; !allowed[k.Value] {

@@ -35,6 +35,8 @@ type ExitEvent struct {
 	Err     error         // non-nil for start failures and abnormal terminations
 	Stopped bool          // the exit was requested by the user (or a restart)
 	RetryIn time.Duration // > 0 when an automatic restart has been scheduled
+	Attempt int           // which consecutive restart attempt RetryIn is for
+	Max     int           // the policy's limit on consecutive attempts
 	GaveUp  bool          // the restart policy ran out of attempts
 }
 

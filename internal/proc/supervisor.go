@@ -1,8 +1,10 @@
 package proc
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/Prabodh-dev/muster/internal/config"
 	"github.com/Prabodh-dev/muster/internal/ringbuf"
@@ -16,10 +18,11 @@ const eventBuffer = 256
 type Status int
 
 const (
-	Running Status = iota
-	Exited         // exited with code 0
-	Crashed        // non-zero exit, killed by a signal, or failed to start
-	Stopped        // stopped by the user
+	Running    Status = iota
+	Exited            // exited with code 0
+	Crashed           // non-zero exit, killed by a signal, or failed to start
+	Stopped           // stopped by the user
+	Restarting        // exited; waiting out the backoff before relaunching
 )
 
 func (s Status) String() string {
@@ -30,6 +33,8 @@ func (s Status) String() string {
 		return "exited"
 	case Stopped:
 		return "stopped"
+	case Restarting:
+		return "restarting"
 	default:
 		return "crashed"
 	}
@@ -74,8 +79,19 @@ type Supervisor struct {
 	stopOnce sync.Once
 }
 
+// timing controls automatic restarts.
+type timing struct {
+	backoffBase time.Duration // delay before the first restart; doubles each time
+	backoffMax  time.Duration // cap on the delay
+	stableAfter time.Duration // a run this long resets the failure count
+}
+
+var defaultTiming = timing{backoffBase: time.Second, backoffMax: 30 * time.Second, stableAfter: 10 * time.Second}
+
 // New starts every process in cfg and returns the supervisor.
-func New(cfg *config.Config) *Supervisor {
+func New(cfg *config.Config) *Supervisor { return newSupervisor(cfg, defaultTiming) }
+
+func newSupervisor(cfg *config.Config, tm timing) *Supervisor {
 	s := &Supervisor{
 		events: make(chan Event, eventBuffer),
 		quit:   make(chan struct{}),
@@ -88,7 +104,7 @@ func New(cfg *config.Config) *Supervisor {
 		s.byName[pc.Name] = st
 	}
 	for _, pc := range cfg.Processes {
-		m := newManaged(pc, s.events, s.quit)
+		m := newManaged(pc, s.events, s.quit, tm)
 		s.procs[pc.Name] = m
 		go m.run()
 	}
@@ -124,18 +140,30 @@ func (s *Supervisor) Apply(ev Event) {
 		case e.Stopped:
 			st.Status = Stopped
 			st.push("[muster] stopped")
+		case e.RetryIn > 0:
+			st.Status = Restarting
+			st.push(fmt.Sprintf("[muster] %s; restart %d/%d in %s", describeExit(e), e.Attempt, e.Max, e.RetryIn.Round(time.Millisecond)))
+		case e.GaveUp:
+			st.Status = Crashed
+			if !e.Crashed() {
+				st.Status = Exited
+			}
+			st.push(fmt.Sprintf("[muster] %s; giving up after %d restarts", describeExit(e), e.Max))
 		case e.Crashed():
 			st.Status = Crashed
-			if e.Err != nil {
-				st.push("[muster] " + e.Err.Error())
-			} else {
-				st.push("[muster] exited with code " + strconv.Itoa(e.Code))
-			}
+			st.push("[muster] " + describeExit(e))
 		default:
 			st.Status = Exited
 			st.push("[muster] exited with code 0")
 		}
 	}
+}
+
+func describeExit(e ExitEvent) string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "exited with code " + strconv.Itoa(e.Code)
 }
 
 func (s *State) push(line string) {
