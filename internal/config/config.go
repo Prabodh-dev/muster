@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,12 +22,20 @@ const DefaultFile = "muster.yaml"
 // does not say otherwise.
 const DefaultBufferLines = 5000
 
+// DefaultGracePeriod is how long a process gets to exit after the polite
+// termination signal before it is force-killed.
+const DefaultGracePeriod = 5 * time.Second
+
 // Process describes one supervised process.
 type Process struct {
 	Name    string
 	Command string
 	Cwd     string // absolute, or empty for the config file's directory
 	Env     map[string]string
+
+	// GracePeriod is how long a stop waits for the process group to exit
+	// before force-killing it. Zero means kill immediately.
+	GracePeriod time.Duration
 }
 
 // Config is a parsed and validated muster.yaml.
@@ -35,14 +45,16 @@ type Config struct {
 }
 
 type rawConfig struct {
-	BufferLines int       `yaml:"buffer_lines"`
-	Processes   yaml.Node `yaml:"processes"`
+	BufferLines        int       `yaml:"buffer_lines"`
+	GracePeriodSeconds *float64  `yaml:"grace_period_seconds"`
+	Processes          yaml.Node `yaml:"processes"`
 }
 
 type rawProcess struct {
-	Command string            `yaml:"command"`
-	Cwd     string            `yaml:"cwd"`
-	Env     map[string]string `yaml:"env"`
+	Command            string            `yaml:"command"`
+	Cwd                string            `yaml:"cwd"`
+	Env                map[string]string `yaml:"env"`
+	GracePeriodSeconds *float64          `yaml:"grace_period_seconds"`
 }
 
 // Load reads and parses the file at path. Relative cwd values are resolved
@@ -83,6 +95,15 @@ func Parse(data []byte, baseDir string) (*Config, error) {
 		cfg.BufferLines = DefaultBufferLines
 	}
 
+	grace := DefaultGracePeriod
+	if raw.GracePeriodSeconds != nil {
+		g, err := graceDuration(*raw.GracePeriodSeconds)
+		if err != nil {
+			return nil, err
+		}
+		grace = g
+	}
+
 	node := raw.Processes
 	if node.Kind == 0 {
 		return nil, errors.New(`missing required "processes" section`)
@@ -116,6 +137,14 @@ func Parse(data []byte, baseDir string) (*Config, error) {
 		if rp.Command == "" {
 			return nil, fmt.Errorf("line %d: process %q is missing a command", valNode.Line, name)
 		}
+		procGrace := grace
+		if rp.GracePeriodSeconds != nil {
+			g, err := graceDuration(*rp.GracePeriodSeconds)
+			if err != nil {
+				return nil, fmt.Errorf("process %q: %w", name, err)
+			}
+			procGrace = g
+		}
 		cwd := rp.Cwd
 		if cwd != "" && !filepath.IsAbs(cwd) {
 			cwd = filepath.Join(baseDir, cwd)
@@ -128,14 +157,23 @@ func Parse(data []byte, baseDir string) (*Config, error) {
 			Command: rp.Command,
 			Cwd:     filepath.Clean(cwd),
 			Env:     rp.Env,
+
+			GracePeriod: procGrace,
 		})
 	}
 	return cfg, nil
 }
 
+func graceDuration(seconds float64) (time.Duration, error) {
+	if math.IsNaN(seconds) || seconds < 0 || seconds > 3600 {
+		return 0, fmt.Errorf("grace_period_seconds must be between 0 and 3600, got %v", seconds)
+	}
+	return time.Duration(seconds * float64(time.Second)), nil
+}
+
 func decodeStrict(n *yaml.Node, out any) error {
 	// Node.Decode has no KnownFields option, so check keys by hand.
-	allowed := map[string]bool{"command": true, "cwd": true, "env": true}
+	allowed := map[string]bool{"command": true, "cwd": true, "env": true, "grace_period_seconds": true}
 	var unknown []string
 	for i := 0; i < len(n.Content); i += 2 {
 		if k := n.Content[i]; !allowed[k.Value] {

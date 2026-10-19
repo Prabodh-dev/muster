@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Prabodh-dev/muster/internal/config"
@@ -21,14 +22,22 @@ const (
 	drainTimeout = 2 * time.Second
 	// defaultGrace is how long a stop waits after the polite signal before killing.
 	defaultGrace = 5 * time.Second
+	// pollInterval is how often a stop checks whether the group has emptied.
+	pollInterval = 20 * time.Millisecond
 )
 
 // instance is one running (or finished) child process.
 type instance struct {
-	cmd  *exec.Cmd
-	pid  int
-	done chan struct{} // closed once the child has exited and its output is drained
-	res  exitInfo      // valid after done is closed
+	cmd   *exec.Cmd
+	pid   int
+	group *group
+
+	leaderExited chan struct{} // closed when the top-level process has exited
+	done         chan struct{} // closed once everything has exited and output is drained
+	res          exitInfo      // valid after done is closed
+
+	mu       sync.Mutex
+	stopping bool // a stop is in progress and owns cleaning up the group
 }
 
 type exitInfo struct {
@@ -65,7 +74,20 @@ func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, s
 	// The child holds its own copy; closing ours lets the reader see EOF.
 	w.Close()
 
-	inst := &instance{cmd: cmd, pid: cmd.Process.Pid, done: make(chan struct{})}
+	grp, err := newGroup(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		r.Close()
+		return nil, err
+	}
+	inst := &instance{
+		cmd:          cmd,
+		pid:          cmd.Process.Pid,
+		group:        grp,
+		leaderExited: make(chan struct{}),
+		done:         make(chan struct{}),
+	}
 	started(inst.pid)
 
 	pumped := make(chan struct{})
@@ -77,6 +99,17 @@ func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, s
 	go func() {
 		defer close(inst.done)
 		waitErr := cmd.Wait()
+		close(inst.leaderExited)
+
+		// If the top-level process left on its own, anything it started is
+		// an orphan nobody will clean up: sweep it. During a stop, stop()
+		// is giving the group its grace period instead.
+		inst.mu.Lock()
+		stopping := inst.stopping
+		inst.mu.Unlock()
+		if !stopping {
+			inst.group.kill()
+		}
 
 		select {
 		case <-pumped:
@@ -85,6 +118,7 @@ func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, s
 			<-pumped
 		}
 		r.Close()
+		inst.group.close()
 
 		inst.res.code = cmd.ProcessState.ExitCode()
 		var exitErr *exec.ExitError
@@ -129,19 +163,48 @@ func send(out chan<- Event, quit <-chan struct{}, ev Event) bool {
 	}
 }
 
-// stop asks the process tree to terminate, escalating to a hard kill if it
-// has not exited after the grace period, and waits for it to finish.
+// stop asks the whole process group to terminate and waits up to grace for
+// every member to go away, then force-kills whatever is left. It returns once
+// the instance is completely done.
 func (i *instance) stop(grace time.Duration) {
 	select {
 	case <-i.done:
 		return
 	default:
 	}
-	terminate(i.cmd)
+	i.mu.Lock()
+	i.stopping = true
+	i.mu.Unlock()
+
+	if err := i.group.terminate(); err != nil {
+		// No way to ask politely (e.g. no console to signal): don't wait.
+		grace = 0
+	}
+	expire := time.NewTimer(grace)
+	defer expire.Stop()
+	tick := time.NewTicker(pollInterval)
+	defer tick.Stop()
+wait:
+	for {
+		if i.leaderGone() && i.group.empty() {
+			break
+		}
+		select {
+		case <-expire.C:
+			break wait
+		case <-tick.C:
+		}
+	}
+	// Final sweep: a no-op when everything exited in time.
+	i.group.kill()
+	<-i.done
+}
+
+func (i *instance) leaderGone() bool {
 	select {
-	case <-i.done:
-	case <-time.After(grace):
-		kill(i.cmd)
-		<-i.done
+	case <-i.leaderExited:
+		return true
+	default:
+		return false
 	}
 }

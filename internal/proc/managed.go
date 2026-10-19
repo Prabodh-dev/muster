@@ -45,7 +45,12 @@ func (m *managed) command(c command) {
 
 func (m *managed) emit(ev Event) { send(m.out, m.quit, ev) }
 
-func (m *managed) grace() time.Duration { return defaultGrace }
+func (m *managed) grace() time.Duration {
+	if m.cfg.GracePeriod < 0 {
+		return defaultGrace
+	}
+	return m.cfg.GracePeriod
+}
 
 func (m *managed) run() {
 	defer close(m.finished)

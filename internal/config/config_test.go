@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseValid(t *testing.T) {
@@ -99,5 +100,44 @@ func TestLoad(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(dir, "nope.yaml")); err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestGracePeriod(t *testing.T) {
+	src := `
+grace_period_seconds: 2.5
+processes:
+  a:
+    command: x
+  b:
+    command: y
+    grace_period_seconds: 0
+`
+	cfg, err := Parse([]byte(src), "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Processes[0].GracePeriod; got != 2500*time.Millisecond {
+		t.Errorf("global grace = %v", got)
+	}
+	if got := cfg.Processes[1].GracePeriod; got != 0 {
+		t.Errorf("per-process grace = %v, want 0", got)
+	}
+
+	cfg, err = Parse([]byte("processes:\n  a:\n    command: x\n"), "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Processes[0].GracePeriod != DefaultGracePeriod {
+		t.Errorf("default grace = %v", cfg.Processes[0].GracePeriod)
+	}
+
+	for _, bad := range []string{
+		"grace_period_seconds: -1\nprocesses:\n  a:\n    command: x\n",
+		"processes:\n  a:\n    command: x\n    grace_period_seconds: 99999\n",
+	} {
+		if _, err := Parse([]byte(bad), "/x"); err == nil || !strings.Contains(err.Error(), "grace_period_seconds") {
+			t.Errorf("expected grace error for %q, got %v", bad, err)
+		}
 	}
 }
