@@ -93,6 +93,26 @@ func renderView(m Model) string {
 		m.vp.View(),
 	)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", main)
-	help := helpStyle.Render("j/k select · r restart · s stop · enter start · pgup/pgdn scroll · q quit")
-	return lipgloss.JoinVertical(lipgloss.Left, body, help)
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.footer())
+}
+
+// footer is the bottom line: the search prompt, the active search, or help.
+func (m Model) footer() string {
+	switch {
+	case m.prompting:
+		return m.input.View() + helpStyle.Render("  "+m.matchSummary()+"  enter keep · esc cancel")
+	case m.query != "":
+		return helpStyle.Render(fmt.Sprintf("/%s  %s  n/N next/prev · / edit · esc clear", m.query, m.matchSummary()))
+	}
+	return helpStyle.Render("j/k select · r restart · s stop · enter start · / search · pgup/pgdn scroll · q quit")
+}
+
+func (m Model) matchSummary() string {
+	if m.query == "" {
+		return ""
+	}
+	if len(m.log.matches) == 0 {
+		return "no matches"
+	}
+	return fmt.Sprintf("%d/%d", m.cur+1, len(m.log.matches))
 }
