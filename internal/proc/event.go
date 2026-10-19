@@ -39,3 +39,5 @@ func (e ExitEvent) String() string {
 		return fmt.Sprintf("%s: exit %d", e.Proc, e.Code)
 	}
 }
+
+func itoa(n int) string { return fmt.Sprint(n) }

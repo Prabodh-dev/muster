@@ -155,4 +155,3 @@ func (p *Process) stop() {
 		<-p.done
 	}
 }
-
