@@ -25,6 +25,7 @@ var (
 	runningDot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
 	exitedDot  = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("○")
 	crashedDot = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("✗")
+	stoppedDot = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("■")
 )
 
 func indicator(s proc.Status) string {
@@ -33,6 +34,8 @@ func indicator(s proc.Status) string {
 		return runningDot
 	case proc.Exited:
 		return exitedDot
+	case proc.Stopped:
+		return stoppedDot
 	default:
 		return crashedDot
 	}
@@ -84,6 +87,6 @@ func renderView(m Model) string {
 		m.vp.View(),
 	)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", main)
-	help := helpStyle.Render("↑/↓ j/k select · pgup/pgdn scroll · g/G top/bottom · q quit")
+	help := helpStyle.Render("j/k select · r restart · s stop · enter start · pgup/pgdn scroll · q quit")
 	return lipgloss.JoinVertical(lipgloss.Left, body, help)
 }

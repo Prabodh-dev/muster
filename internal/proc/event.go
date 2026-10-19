@@ -2,7 +2,10 @@
 // reports everything that happens to them as events on a single channel.
 package proc
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Event is implemented by every message a process can emit.
 type Event interface {
@@ -16,28 +19,36 @@ type LineEvent struct {
 	Text string
 }
 
-// ExitEvent is sent exactly once per process, after its output has been
+// StartEvent is sent each time the process is launched.
+type StartEvent struct {
+	Proc     string
+	PID      int
+	Restarts int // how many times it has been relaunched so far
+}
+
+// ExitEvent is sent once per run, after the process's output has been
 // drained. Code is the exit code, or -1 when the process was killed by a
 // signal or never started.
 type ExitEvent struct {
-	Proc string
-	Code int
-	Err  error // non-nil for start failures and abnormal terminations
+	Proc    string
+	Code    int
+	Err     error         // non-nil for start failures and abnormal terminations
+	Stopped bool          // the exit was requested by the user (or a restart)
+	RetryIn time.Duration // > 0 when an automatic restart has been scheduled
+	GaveUp  bool          // the restart policy ran out of attempts
 }
 
-func (e LineEvent) ProcName() string { return e.Proc }
-func (e ExitEvent) ProcName() string { return e.Proc }
+func (e LineEvent) ProcName() string  { return e.Proc }
+func (e StartEvent) ProcName() string { return e.Proc }
+func (e ExitEvent) ProcName() string  { return e.Proc }
 
-// Crashed reports whether the exit counts as a crash rather than a clean exit.
-func (e ExitEvent) Crashed() bool { return e.Code != 0 || e.Err != nil }
+// Crashed reports whether the exit counts as a crash rather than a clean exit
+// or a requested stop.
+func (e ExitEvent) Crashed() bool { return !e.Stopped && (e.Code != 0 || e.Err != nil) }
 
 func (e ExitEvent) String() string {
-	switch {
-	case e.Err != nil:
+	if e.Err != nil {
 		return fmt.Sprintf("%s: %v", e.Proc, e.Err)
-	default:
-		return fmt.Sprintf("%s: exit %d", e.Proc, e.Code)
 	}
+	return fmt.Sprintf("%s: exit %d", e.Proc, e.Code)
 }
-
-func itoa(n int) string { return fmt.Sprint(n) }

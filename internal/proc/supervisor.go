@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"strconv"
 	"sync"
 
 	"github.com/Prabodh-dev/muster/internal/config"
@@ -18,6 +19,7 @@ const (
 	Running Status = iota
 	Exited         // exited with code 0
 	Crashed        // non-zero exit, killed by a signal, or failed to start
+	Stopped        // stopped by the user
 )
 
 func (s Status) String() string {
@@ -26,6 +28,8 @@ func (s Status) String() string {
 		return "running"
 	case Exited:
 		return "exited"
+	case Stopped:
+		return "stopped"
 	default:
 		return "crashed"
 	}
@@ -34,9 +38,10 @@ func (s Status) String() string {
 // State is the UI-facing view of one process: its status and bounded log.
 // It is only mutated through Supervisor.Apply.
 type State struct {
-	Name   string
-	Status Status
-	Code   int
+	Name     string
+	Status   Status
+	Code     int
+	Restarts int
 
 	mu   sync.Mutex
 	logs *ringbuf.Buffer
@@ -64,7 +69,7 @@ type Supervisor struct {
 
 	states []*State
 	byName map[string]*State
-	procs  []*Process
+	procs  map[string]*managed
 
 	stopOnce sync.Once
 }
@@ -75,6 +80,7 @@ func New(cfg *config.Config) *Supervisor {
 		events: make(chan Event, eventBuffer),
 		quit:   make(chan struct{}),
 		byName: map[string]*State{},
+		procs:  map[string]*managed{},
 	}
 	for _, pc := range cfg.Processes {
 		st := &State{Name: pc.Name, logs: ringbuf.New(cfg.BufferLines)}
@@ -82,7 +88,9 @@ func New(cfg *config.Config) *Supervisor {
 		s.byName[pc.Name] = st
 	}
 	for _, pc := range cfg.Processes {
-		s.procs = append(s.procs, spawn(pc, s.events, s.quit))
+		m := newManaged(pc, s.events, s.quit)
+		s.procs[pc.Name] = m
+		go m.run()
 	}
 	return s
 }
@@ -105,38 +113,61 @@ func (s *Supervisor) Apply(ev Event) {
 		st.mu.Lock()
 		st.logs.Push(e.Text)
 		st.mu.Unlock()
+	case StartEvent:
+		st.Status = Running
+		st.Code = 0
+		st.Restarts = e.Restarts
+		st.push("[muster] started (pid " + strconv.Itoa(e.PID) + ")")
 	case ExitEvent:
 		st.Code = e.Code
-		if e.Crashed() {
-			st.Status = Crashed
-		} else {
-			st.Status = Exited
-		}
-		st.mu.Lock()
 		switch {
-		case e.Err != nil:
-			st.logs.Push("[muster] " + e.Err.Error())
+		case e.Stopped:
+			st.Status = Stopped
+			st.push("[muster] stopped")
+		case e.Crashed():
+			st.Status = Crashed
+			if e.Err != nil {
+				st.push("[muster] " + e.Err.Error())
+			} else {
+				st.push("[muster] exited with code " + strconv.Itoa(e.Code))
+			}
 		default:
-			st.logs.Push("[muster] exited with code " + itoa(e.Code))
+			st.Status = Exited
+			st.push("[muster] exited with code 0")
 		}
-		st.mu.Unlock()
 	}
 }
 
-// Stop terminates every child process tree and waits for them to finish.
+func (s *State) push(line string) {
+	s.mu.Lock()
+	s.logs.Push(line)
+	s.mu.Unlock()
+}
+
+// Start launches a stopped or exited process. It does nothing if the process
+// is already running.
+func (s *Supervisor) Start(name string) { s.send(name, cmdStart) }
+
+// Stop gracefully stops one process and leaves the others alone.
+func (s *Supervisor) Stop(name string) { s.send(name, cmdStop) }
+
+// Restart stops (if running) and relaunches one process.
+func (s *Supervisor) Restart(name string) { s.send(name, cmdRestart) }
+
+func (s *Supervisor) send(name string, c command) {
+	if m := s.procs[name]; m != nil {
+		m.command(c)
+	}
+}
+
+// Shutdown terminates every child process tree and waits for them to finish.
 // It is safe to call more than once.
-func (s *Supervisor) Stop() {
+func (s *Supervisor) Shutdown() {
 	s.stopOnce.Do(func() {
 		// Release any producer blocked on a full channel first.
 		close(s.quit)
-		var wg sync.WaitGroup
-		for _, p := range s.procs {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				p.stop()
-			}()
+		for _, m := range s.procs {
+			<-m.finished
 		}
-		wg.Wait()
 	})
 }

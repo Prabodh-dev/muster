@@ -86,13 +86,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			// Children must not outlive muster: stop them before quitting.
-			m.sup.Stop()
+			m.sup.Shutdown()
 			return m, tea.Quit
 		case "up", "k":
 			m.selectProc(m.selected - 1)
 			return m, nil
 		case "down", "j":
 			m.selectProc(m.selected + 1)
+			return m, nil
+		case "r":
+			m.sup.Restart(m.states[m.selected].Name)
+			return m, nil
+		case "s":
+			m.sup.Stop(m.states[m.selected].Name)
+			return m, nil
+		case "enter":
+			m.sup.Start(m.states[m.selected].Name)
 			return m, nil
 		case "g", "home":
 			m.vp.GotoTop()

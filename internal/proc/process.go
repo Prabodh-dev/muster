@@ -19,38 +19,31 @@ const (
 	// drainTimeout bounds how long we wait for output to reach EOF after the
 	// process itself has exited (a background grandchild can hold the pipe).
 	drainTimeout = 2 * time.Second
-	// stopGrace is how long Stop waits after the polite signal before killing.
-	stopGrace = 2 * time.Second
+	// defaultGrace is how long a stop waits after the polite signal before killing.
+	defaultGrace = 5 * time.Second
 )
 
-// Process is one running (or finished) child.
-type Process struct {
-	cfg config.Process
-
+// instance is one running (or finished) child process.
+type instance struct {
 	cmd  *exec.Cmd
-	done chan struct{} // closed once the ExitEvent has been delivered
+	pid  int
+	done chan struct{} // closed once the child has exited and its output is drained
+	res  exitInfo      // valid after done is closed
 }
 
-// Name returns the configured process name.
-func (p *Process) Name() string { return p.cfg.Name }
+type exitInfo struct {
+	code int
+	err  error
+}
 
-// spawn starts the child with stdout and stderr redirected into one pipe, and
-// starts the goroutines that read it. Events are delivered on out; delivery
-// is abandoned if quit is closed so a departed consumer never wedges them.
-func spawn(cfg config.Process, out chan<- Event, quit <-chan struct{}) *Process {
-	p := &Process{cfg: cfg, done: make(chan struct{})}
-
-	fail := func(err error) *Process {
-		go func() {
-			defer close(p.done)
-			send(out, quit, ExitEvent{Proc: cfg.Name, Code: -1, Err: err})
-		}()
-		return p
-	}
-
+// startInstance launches the child with stdout and stderr redirected into one
+// pipe and starts the goroutine that reads it. started is called with the pid
+// before any output is delivered. Events go to out; delivery is abandoned if
+// quit is closed so a departed consumer never wedges the reader.
+func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, started func(pid int)) (*instance, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
-		return fail(fmt.Errorf("creating pipe: %w", err))
+		return nil, fmt.Errorf("creating pipe: %w", err)
 	}
 
 	cmd := shellCommand(cfg.Command)
@@ -67,11 +60,13 @@ func spawn(cfg config.Process, out chan<- Event, quit <-chan struct{}) *Process 
 	if err := cmd.Start(); err != nil {
 		r.Close()
 		w.Close()
-		return fail(fmt.Errorf("start: %w", err))
+		return nil, fmt.Errorf("start: %w", err)
 	}
 	// The child holds its own copy; closing ours lets the reader see EOF.
 	w.Close()
-	p.cmd = cmd
+
+	inst := &instance{cmd: cmd, pid: cmd.Process.Pid, done: make(chan struct{})}
+	started(inst.pid)
 
 	pumped := make(chan struct{})
 	go func() {
@@ -80,7 +75,7 @@ func spawn(cfg config.Process, out chan<- Event, quit <-chan struct{}) *Process 
 	}()
 
 	go func() {
-		defer close(p.done)
+		defer close(inst.done)
 		waitErr := cmd.Wait()
 
 		select {
@@ -91,16 +86,15 @@ func spawn(cfg config.Process, out chan<- Event, quit <-chan struct{}) *Process 
 		}
 		r.Close()
 
-		ev := ExitEvent{Proc: cfg.Name, Code: cmd.ProcessState.ExitCode()}
+		inst.res.code = cmd.ProcessState.ExitCode()
 		var exitErr *exec.ExitError
 		if waitErr != nil && !errors.As(waitErr, &exitErr) {
-			ev.Err = waitErr
-		} else if ev.Code == -1 {
-			ev.Err = errors.New("terminated by signal")
+			inst.res.err = waitErr
+		} else if inst.res.code == -1 {
+			inst.res.err = errors.New("terminated by signal")
 		}
-		send(out, quit, ev)
 	}()
-	return p
+	return inst, nil
 }
 
 // pump reads lines from r until EOF and sends each as a LineEvent.
@@ -137,21 +131,17 @@ func send(out chan<- Event, quit <-chan struct{}, ev Event) bool {
 
 // stop asks the process tree to terminate, escalating to a hard kill if it
 // has not exited after the grace period, and waits for it to finish.
-func (p *Process) stop() {
-	if p.cmd == nil || p.cmd.Process == nil {
-		<-p.done
-		return
-	}
+func (i *instance) stop(grace time.Duration) {
 	select {
-	case <-p.done:
+	case <-i.done:
 		return
 	default:
 	}
-	terminate(p.cmd)
+	terminate(i.cmd)
 	select {
-	case <-p.done:
-	case <-time.After(stopGrace):
-		kill(p.cmd)
-		<-p.done
+	case <-i.done:
+	case <-time.After(grace):
+		kill(i.cmd)
+		<-i.done
 	}
 }

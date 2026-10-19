@@ -115,7 +115,7 @@ func collect(t *testing.T, s *Supervisor, until func() bool) {
 func TestSupervisorCapturesOutputAndExitStatus(t *testing.T) {
 	skipOnWindows(t)
 	cfg := &config.Config{
-		BufferLines: 3,
+		BufferLines: 5,
 		Processes: []config.Process{
 			{Name: "ok", Command: "echo one; echo two >&2; echo three; echo four; echo five", Cwd: t.TempDir()},
 			{Name: "bad", Command: "echo boom; exit 7", Cwd: t.TempDir()},
@@ -124,7 +124,7 @@ func TestSupervisorCapturesOutputAndExitStatus(t *testing.T) {
 		},
 	}
 	s := New(cfg)
-	defer s.Stop()
+	defer s.Shutdown()
 	st := s.States()
 	collect(t, s, func() bool {
 		for _, x := range st {
@@ -141,15 +141,16 @@ func TestSupervisorCapturesOutputAndExitStatus(t *testing.T) {
 	if st[3].Status != Crashed {
 		t.Errorf("start failure should be crashed, got %v", st[3].Status)
 	}
-	// Ring buffer of 3 keeps only the tail (incl. the muster exit note).
-	if got := st[0].Lines(); len(got) != 3 || got[0] != "four" || got[1] != "five" {
+	// Ring buffer of 5 keeps only the tail: the start note and "one"
+	// have been evicted by the time the exit note arrives.
+	if got := st[0].Lines(); len(got) != 5 || got[0] != "two" || got[3] != "five" {
 		t.Errorf("ok lines = %q", got)
 	}
 	if st[0].Dropped() == 0 {
 		t.Error("expected dropped lines")
 	}
-	if got := st[2].Lines(); got[0] != "hello" {
-		t.Errorf("env lines = %q", got)
+	if !hasLine(st[2], "hello") {
+		t.Errorf("env lines = %q", st[2].Lines())
 	}
 }
 
@@ -182,8 +183,8 @@ func TestStopTerminatesProcessTree(t *testing.T) {
 		return len(pids) == 2
 	})
 
-	s.Stop()
-	s.Stop() // idempotent
+	s.Shutdown()
+	s.Shutdown() // idempotent
 
 	deadline := time.Now().Add(5 * time.Second)
 	for _, pid := range pids {
@@ -194,4 +195,13 @@ func TestStopTerminatesProcessTree(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
+}
+
+func hasLine(st *State, want string) bool {
+	for _, l := range st.Lines() {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }

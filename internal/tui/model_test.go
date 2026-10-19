@@ -33,7 +33,7 @@ func newModel(t *testing.T, procs ...config.Process) (Model, *proc.Supervisor) {
 		procs[i].Cwd = t.TempDir()
 	}
 	sup := proc.New(&config.Config{BufferLines: 100, Processes: procs})
-	t.Cleanup(sup.Stop)
+	t.Cleanup(sup.Shutdown)
 	m := New(sup)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return next.(Model), sup
@@ -83,7 +83,7 @@ func TestLogPaneFollowsSelection(t *testing.T) {
 		config.Process{Name: "b", Command: "echo from-b; sleep 30"},
 	)
 	m = pumpUntil(t, m, sup, func(m Model) bool {
-		return len(m.states[0].Lines()) > 0 && len(m.states[1].Lines()) > 0
+		return hasLine(m.states[0], "from-a") && hasLine(m.states[1], "from-b")
 	})
 	next, _ := m.Update(key("j"))
 	m = next.(Model)
@@ -156,3 +156,12 @@ func alive(pid int) bool {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func hasLine(st *proc.State, want string) bool {
+	for _, l := range st.Lines() {
+		if l == want {
+			return true
+		}
+	}
+	return false
+}
