@@ -119,7 +119,7 @@ func (m *managed) run() {
 	start := func() {
 		var err error
 		inst, err = startInstance(m.cfg, m.out, m.quit, func(pid int) {
-			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: max(launches-1, 0)})
+			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: launches})
 		})
 		launches++
 		startedAt = time.Now()

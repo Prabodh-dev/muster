@@ -36,7 +36,12 @@ func (g *group) kill() { _ = syscall.Kill(-g.pgid, syscall.SIGKILL) }
 
 // empty reports whether no process is left in the group.
 func (g *group) empty() bool {
-	return errors.Is(syscall.Kill(-g.pgid, 0), syscall.ESRCH)
+	if errors.Is(syscall.Kill(-g.pgid, 0), syscall.ESRCH) {
+		return true
+	}
+	// Something still answers; it may only be an unreaped zombie.
+	live, ok := liveMembers(g.pgid)
+	return ok && !live
 }
 
 func (g *group) close() {}
