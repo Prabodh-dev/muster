@@ -12,6 +12,7 @@ import (
 	"github.com/Prabodh-dev/muster/internal/proc"
 	"github.com/Prabodh-dev/muster/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 )
 
 func main() {
@@ -67,6 +68,5 @@ func run() error {
 }
 
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
