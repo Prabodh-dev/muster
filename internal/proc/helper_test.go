@@ -52,6 +52,24 @@ func runHelper(mode string) {
 		fmt.Println("ready")
 		time.Sleep(10 * time.Minute)
 
+	case "spin":
+		// Burns one core.
+		fmt.Println("spinning")
+		x := 0
+		for {
+			x++
+			if x < 0 {
+				return
+			}
+		}
+
+	case "lines":
+		n, _ := strconv.Atoi(os.Getenv("MUSTER_TEST_LINES"))
+		for i := 1; i <= n; i++ {
+			fmt.Println("line " + strconv.Itoa(i))
+		}
+		time.Sleep(10 * time.Minute)
+
 	case "exit":
 		code, _ := strconv.Atoi(os.Getenv("MUSTER_TEST_EXIT"))
 		fmt.Println("running")

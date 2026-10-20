@@ -12,6 +12,7 @@ import (
 	"github.com/Prabodh-dev/muster/internal/proc"
 	"github.com/Prabodh-dev/muster/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
 )
 
 func main() {
@@ -23,8 +24,9 @@ func main() {
 
 func run() error {
 	path := flag.String("f", config.DefaultFile, "path to the config file")
+	force := flag.Bool("ignore-port-conflicts", false, "start even if a declared port is already in use")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: muster [-f %s]\n", config.DefaultFile)
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: muster [-f %s] [-ignore-port-conflicts]\n", config.DefaultFile)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -34,10 +36,23 @@ func run() error {
 		return err
 	}
 
+	// Before spawning anything, so a clash is explained rather than left to
+	// show up as two confusing crashes.
+	if err := checkPorts(cfg.Processes, *force, isTerminal(os.Stdin), os.Stdin, os.Stderr); err != nil {
+		os.Exit(1)
+	}
+
+	ports := map[string][]int{}
+	for _, p := range cfg.Processes {
+		if len(p.Ports) > 0 {
+			ports[p.Name] = p.Ports
+		}
+	}
+
 	sup := proc.New(cfg)
 	// Covers every exit path, including the program being killed by a signal.
 	defer sup.Shutdown()
-	p := tea.NewProgram(tui.New(sup), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(tui.New(sup, ports), tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Bubble Tea handles SIGINT/SIGTERM itself; a closed terminal sends
 	// SIGHUP, which would otherwise kill us and orphan the children.
@@ -50,4 +65,8 @@ func run() error {
 
 	_, err = p.Run()
 	return err
+}
+
+func isTerminal(f *os.File) bool {
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }

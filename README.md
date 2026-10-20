@@ -59,8 +59,9 @@ go build -o muster ./cmd/muster
 2. Run it:
 
    ```sh
-   muster            # uses ./muster.yaml
+   muster                         # uses ./muster.yaml
    muster -f path/to/other.yaml
+   muster -ignore-port-conflicts  # start even if a declared port is taken
    ```
 
    This repository's own `muster.yaml` is a runnable example:
@@ -95,6 +96,21 @@ process. While the prompt is open every key goes to it, so `q` types a `q`.
 A line containing a match is shown without its colour codes so highlights
 cannot be split by them.
 
+### The sidebar
+
+Each process takes two lines in the sidebar:
+
+```
+● backend
+  2.3% · 145MB · 1m23s
+```
+
+While a process runs, the second line shows its CPU use, resident memory and
+uptime. For anything that is not running it says what happened instead:
+`exited`, `crashed (exit 3)`, `stopped` or `restarting…`. The header above the
+log repeats the status, shows the ports the process declared, and notes when
+the figures cover more than one process (`3 processes`).
+
 Status indicators: `●` running, `○` exited with code 0, `✗` crashed (non-zero
 exit code, killed by a signal, or failed to start), `■` stopped by you, `↻`
 waiting to be restarted automatically.
@@ -107,6 +123,11 @@ instead of silently ignored.
 ```yaml
 buffer_lines: 5000          # optional: log lines kept per process (default 5000)
 grace_period_seconds: 5     # optional: default shutdown grace period (default 5)
+stats_interval_seconds: 2   # optional: CPU/memory sampling period; 0 turns it off (default 2)
+
+logs:                       # optional: write each process's output to disk
+  enabled: true             #   default false
+  dir: .muster/logs         #   default .muster/logs, relative to this file
 
 processes:                  # required, at least one entry; order is the sidebar order
   <name>:
@@ -117,7 +138,14 @@ processes:                  # required, at least one entry; order is the sidebar
     grace_period_seconds: 10     # optional: overrides the global grace period
     restart: never               # optional: never (default) | on-failure | always
     max_restarts: 5              # optional: consecutive automatic restarts (default 5)
+    ports: [3000, 8080]          # optional: TCP ports it listens on, checked before startup
 ```
+
+Every problem in the file is reported with its line number, for example
+`line 7: port must be between 1 and 65535, got 70000`. Unknown keys, duplicate
+process names, a port declared twice (in one process or two), a
+`stats_interval_seconds` that is neither `0` nor between 0.5 and 3600, a
+non-boolean `logs.enabled` and so on are all rejected before anything starts.
 
 - stdout and stderr are merged into one stream per process.
 - Each process keeps only its last `buffer_lines` lines, so a chatty
@@ -163,6 +191,97 @@ those leftovers right away rather than letting them linger as orphans. A
 program that deliberately daemonizes into a new session or process group is
 outside muster's control and will not be touched.
 
+### Resource usage and uptime
+
+CPU and memory are sampled every `stats_interval_seconds` (default 2; `0`
+disables sampling; the minimum is 0.5 because each sample reads the system's
+process table).
+
+**The figures cover the whole process tree, not just the top-level process.**
+A dev server such as `npm run dev` does its work in children, so measuring
+only the process muster launched (usually a shell) would report almost
+nothing. Each sample takes the launched process plus every descendant:
+
+- *CPU* is the sum over the tree, where 100% is one fully busy core, so a
+  multi-threaded tree can read above 100%, as in `top`. It is the average
+  since the previous sample, so the first reading after a (re)start is 0.0%.
+- *Memory* is the sum of resident set size. Memory shared between processes
+  in the tree (for example by forked workers) is counted once per process, so
+  the total can overstate real use.
+- *Uptime* counts from the most recent start, and goes back to zero on a
+  restart, whether you pressed `r` or a restart policy did it.
+
+How the tree is found: by following parent pids from the launched process.
+That is portable (Linux, macOS and Windows all expose it) but means a
+grandchild whose parent has already exited, and so was re-parented to init, is
+no longer counted, even though it is still in the process group or job object
+that muster stops. Doing it by process group or job membership would catch
+those, but the library used for sampling does not expose either on every
+platform. On Windows, walking the process table can be slower than
+on Linux, which is one more reason not to sample faster than you need.
+
+### Port conflicts
+
+If a process listens on a port, declare it:
+
+```yaml
+processes:
+  frontend:
+    command: npm run dev
+    ports: [3000]
+  backend:
+    command: go run ./cmd/api
+    ports: [8080, 8081]
+  worker:
+    command: go run ./cmd/worker   # not a listener, no ports needed
+```
+
+Before spawning anything, muster tries to bind every declared port. If one is
+taken, it stops and says so (naming the owner when the OS lets it find out):
+
+```
+muster: some declared ports are already in use. Nothing has been started yet.
+
+  frontend: port 3000 is already in use by node (pid 4242)
+  backend: port 8081 is already in use
+
+Those processes will probably fail to bind. Start anyway? [y/N]
+```
+
+In a terminal you are asked whether to continue (the default is no). When
+input is not a terminal, such as in a script, muster refuses to start. Either
+way `muster -ignore-port-conflicts` prints the same warning and starts
+anyway.
+
+Notes: only TCP is checked. The test is "can I bind this port on all
+interfaces right now", so it also notices a listener bound to just
+`127.0.0.1`. A privileged port (below 1024) that muster is not allowed to
+test is not reported as a conflict. The check happens once, at startup, not
+when you restart a process. Declaring the same port on two processes is a
+config error.
+
+### Log files
+
+With `logs.enabled: true` every process's output is also appended to
+`<dir>/<process-name>.log` (default `.muster/logs/`, relative to the config
+file; the directory is created if needed). The in-memory buffer only keeps the
+last `buffer_lines` lines, and is gone when muster exits, so the file is what
+you read after a crash or after output has scrolled out of the buffer.
+
+- Output is written exactly as the process produced it (stdout and stderr
+  merged), including very long lines the log pane would split.
+- muster adds its own timestamped entries for starts, exits, restarts and
+  shutdown, such as `[muster 2026-10-20T10:15:02Z] exited with code 1;
+  restart 1/5 in 1s`, so you can see where each run begins and ends.
+- Files are appended to across runs and are never rotated or truncated by
+  muster. Delete them when you want a clean slate. `.muster/` is a sensible
+  entry for your `.gitignore`.
+- Process names are made safe for file names by percent-encoding anything
+  other than letters, digits, `-`, `_` and `.` (so `api/v2` is written to
+  `api%2Fv2.log`).
+- If a log file cannot be opened or written, the process keeps running; the
+  problem is shown once in that process's log pane and saving stops.
+
 ### Restart policies
 
 `restart` decides what happens when a process exits by itself (stopping it
@@ -200,6 +319,10 @@ exiting.
   process-tree tests run everywhere.
 - Log search is a plain case-insensitive substring match. A filter mode that
   hides non-matching lines is not implemented yet.
+- Resource figures follow parent pids, so a grandchild whose parent has
+  exited is not counted (see "Resource usage and uptime").
+- Port checks are TCP only and happen once, at startup.
+- Log files are not rotated.
 - Restart backoff timings (1s doubling to 30s, 10s to count as healthy) are
   fixed rather than configurable.
 

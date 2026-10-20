@@ -41,7 +41,7 @@ func TestFanInConcurrent(t *testing.T) {
 		}()
 		go func() {
 			defer producers.Done()
-			pump(r, name, out, quit)
+			pump(r, name, out, quit, nil)
 		}()
 	}
 	go func() { producers.Wait(); close(out) }()
@@ -68,7 +68,7 @@ func TestPumpAbandonsOnQuit(t *testing.T) {
 	quit := make(chan struct{})
 	r, w := io.Pipe()
 	done := make(chan struct{})
-	go func() { pump(r, "x", out, quit); close(done) }()
+	go func() { pump(r, "x", out, quit, nil); close(done) }()
 	go func() { fmt.Fprintln(w, "a"); fmt.Fprintln(w, "b"); w.Close() }()
 	time.Sleep(20 * time.Millisecond)
 	close(quit)
@@ -84,7 +84,7 @@ func TestPumpSplitsLongLinesAndTrimsCR(t *testing.T) {
 	quit := make(chan struct{})
 	long := strings.Repeat("x", maxLine+10)
 	go func() {
-		pump(strings.NewReader("hi\r\n"+long+"\ntail"), "x", out, quit)
+		pump(strings.NewReader("hi\r\n"+long+"\ntail"), "x", out, quit, nil)
 		close(out)
 	}()
 	var got []string

@@ -2,6 +2,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/Prabodh-dev/muster/internal/proc"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -12,6 +14,13 @@ import (
 // chatty process costs one re-render per batch instead of one per line.
 const maxBatch = 512
 
+// tickMsg re-renders once a second so uptimes keep counting.
+type tickMsg time.Time
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
 // eventsMsg is a batch of process events pulled from the fan-in channel.
 type eventsMsg []proc.Event
 
@@ -20,6 +29,7 @@ type Model struct {
 	sup      *proc.Supervisor
 	states   []*proc.State
 	selected int
+	ports    map[string][]int // declared ports, shown in the header
 
 	vp            viewport.Model
 	width, height int
@@ -33,16 +43,17 @@ type Model struct {
 	log       rendered
 }
 
-// New returns a model rendering the given supervisor.
-func New(sup *proc.Supervisor) Model {
+// New returns a model rendering the given supervisor. ports maps process
+// names to the ports they declare, for display; it may be nil.
+func New(sup *proc.Supervisor, ports map[string][]int) Model {
 	in := textinput.New()
 	in.Prompt = "/"
 	in.CharLimit = 256
-	return Model{sup: sup, states: sup.States(), input: in}
+	return Model{sup: sup, states: sup.States(), ports: ports, input: in}
 }
 
 // Init starts consuming the fan-in channel.
-func (m Model) Init() tea.Cmd { return waitForEvents(m.sup.Events()) }
+func (m Model) Init() tea.Cmd { return tea.Batch(waitForEvents(m.sup.Events()), tick()) }
 
 // waitForEvents blocks until at least one event is available, then drains
 // whatever else is already queued. It is the single consumer of the channel.
@@ -76,6 +87,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		m.refresh(true)
 		return m, nil
+
+	case tickMsg:
+		return m, tick()
 
 	case eventsMsg:
 		touched := false

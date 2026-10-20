@@ -1,7 +1,7 @@
 package proc
 
 import (
-	"fmt"
+	"github.com/Prabodh-dev/muster/internal/stats"
 	"strconv"
 	"sync"
 	"time"
@@ -48,6 +48,16 @@ type State struct {
 	Code     int
 	Restarts int
 
+	// StartedAt is when the current run began; it moves forward on every
+	// (re)start. Only meaningful while Status is Running.
+	StartedAt time.Time
+
+	// Resource use of the running process tree, from the latest sample.
+	HasStats bool
+	CPU      float64
+	RSS      uint64
+	Procs    int
+
 	mu   sync.Mutex
 	logs *ringbuf.Buffer
 }
@@ -75,6 +85,8 @@ type Supervisor struct {
 	states []*State
 	byName map[string]*State
 	procs  map[string]*managed
+
+	sampling chan struct{} // closed when the stats goroutine has exited; nil if off
 
 	stopOnce sync.Once
 }
@@ -104,9 +116,23 @@ func newSupervisor(cfg *config.Config, tm timing) *Supervisor {
 		s.byName[pc.Name] = st
 	}
 	for _, pc := range cfg.Processes {
-		m := newManaged(pc, s.events, s.quit, tm)
+		var fl *fileLog
+		if cfg.Logs.Enabled {
+			var err error
+			if fl, err = openFileLog(cfg.Logs.Dir, pc.Name); err != nil {
+				s.byName[pc.Name].push("[muster] cannot write log file, continuing without it: " + err.Error())
+				fl = nil
+			} else {
+				s.byName[pc.Name].push("[muster] logging to " + fl.path)
+			}
+		}
+		m := newManaged(pc, s.events, s.quit, tm, fl)
 		s.procs[pc.Name] = m
 		go m.run()
+	}
+	if cfg.StatsInterval > 0 {
+		s.sampling = make(chan struct{})
+		go s.sampleLoop(cfg.StatsInterval)
 	}
 	return s
 }
@@ -129,41 +155,41 @@ func (s *Supervisor) Apply(ev Event) {
 		st.mu.Lock()
 		st.logs.Push(e.Text)
 		st.mu.Unlock()
+	case StatsEvent:
+		if st.Status == Running {
+			st.HasStats, st.CPU, st.RSS, st.Procs = true, e.CPU, e.RSS, e.Procs
+		}
 	case StartEvent:
 		st.Status = Running
 		st.Code = 0
 		st.Restarts = e.Restarts
+		st.StartedAt = e.At
+		st.HasStats = false
 		st.push("[muster] started (pid " + strconv.Itoa(e.PID) + ")")
 	case ExitEvent:
 		st.Code = e.Code
+		st.HasStats = false
 		switch {
 		case e.Stopped:
 			st.Status = Stopped
-			st.push("[muster] stopped")
 		case e.RetryIn > 0:
 			st.Status = Restarting
-			st.push(fmt.Sprintf("[muster] %s; restart %d/%d in %s", describeExit(e), e.Attempt, e.Max, e.RetryIn.Round(time.Millisecond)))
-		case e.GaveUp:
-			st.Status = Crashed
-			if !e.Crashed() {
-				st.Status = Exited
-			}
-			st.push(fmt.Sprintf("[muster] %s; giving up after %d restarts", describeExit(e), e.Max))
 		case e.Crashed():
 			st.Status = Crashed
-			st.push("[muster] " + describeExit(e))
 		default:
 			st.Status = Exited
-			st.push("[muster] exited with code 0")
 		}
+		st.push("[muster] " + e.Summary())
 	}
 }
 
-func describeExit(e ExitEvent) string {
-	if e.Err != nil {
-		return e.Err.Error()
+// Uptime is how long the current run has been going at time now, or zero
+// when the process is not running.
+func (s *State) Uptime(now time.Time) time.Duration {
+	if s.Status != Running || s.StartedAt.IsZero() {
+		return 0
 	}
-	return "exited with code " + strconv.Itoa(e.Code)
+	return max(now.Sub(s.StartedAt), 0)
 }
 
 func (s *State) push(line string) {
@@ -197,5 +223,38 @@ func (s *Supervisor) Shutdown() {
 		for _, m := range s.procs {
 			<-m.finished
 		}
+		if s.sampling != nil {
+			<-s.sampling
+		}
 	})
+}
+
+// sampleLoop periodically measures every running process tree and reports
+// the result through the same event channel as everything else.
+func (s *Supervisor) sampleLoop(every time.Duration) {
+	defer close(s.sampling)
+	collector := stats.NewCollector()
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-s.quit:
+			return
+		case <-tick.C:
+		}
+		roots := make([]int, 0, len(s.procs))
+		owner := make(map[int]string, len(s.procs))
+		for name, m := range s.procs {
+			if pid := int(m.pid.Load()); pid != 0 {
+				roots = append(roots, pid)
+				owner[pid] = name
+			}
+		}
+		for pid, sample := range collector.Sample(roots) {
+			ev := StatsEvent{Proc: owner[pid], CPU: sample.CPU, RSS: sample.RSS, Procs: sample.Procs}
+			if !send(s.events, s.quit, ev) {
+				return
+			}
+		}
+	}
 }

@@ -6,10 +6,17 @@
 # platforms (see "Commands and the shell" in the README).
 
 grace_period_seconds: 5
+stats_interval_seconds: 2   # CPU/memory sampling; 0 turns it off
+
+logs:
+  enabled: true             # write each process's output to .muster/logs/<name>.log
 
 processes:
   clock:
-    command: go run ./examples/demo -name clock -every 1s
+    command: go run ./examples/demo -name clock -every 1s -listen 127.0.0.1:47001
+    # muster checks this port before starting anything and warns if
+    # something else already has it.
+    ports: [47001]
 
   greeter:
     command: go run ./examples/demo -name greeter -count 2

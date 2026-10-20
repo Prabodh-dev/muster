@@ -4,6 +4,7 @@ package proc
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -24,6 +25,16 @@ type StartEvent struct {
 	Proc     string
 	PID      int
 	Restarts int // how many times it has been relaunched so far
+	At       time.Time
+}
+
+// StatsEvent is a periodic resource sample for a running process and its
+// descendants.
+type StatsEvent struct {
+	Proc  string
+	CPU   float64 // percent of one core, summed over the tree
+	RSS   uint64  // resident bytes, summed over the tree
+	Procs int     // processes in the tree
 }
 
 // ExitEvent is sent once per run, after the process's output has been
@@ -43,6 +54,7 @@ type ExitEvent struct {
 func (e LineEvent) ProcName() string  { return e.Proc }
 func (e StartEvent) ProcName() string { return e.Proc }
 func (e ExitEvent) ProcName() string  { return e.Proc }
+func (e StatsEvent) ProcName() string { return e.Proc }
 
 // Crashed reports whether the exit counts as a crash rather than a clean exit
 // or a requested stop.
@@ -53,4 +65,21 @@ func (e ExitEvent) String() string {
 		return fmt.Sprintf("%s: %v", e.Proc, e.Err)
 	}
 	return fmt.Sprintf("%s: exit %d", e.Proc, e.Code)
+}
+
+// Summary describes the exit in words, for logs.
+func (e ExitEvent) Summary() string {
+	what := "exited with code " + strconv.Itoa(e.Code)
+	if e.Err != nil {
+		what = e.Err.Error()
+	}
+	switch {
+	case e.Stopped:
+		return "stopped"
+	case e.RetryIn > 0:
+		return fmt.Sprintf("%s; restart %d/%d in %s", what, e.Attempt, e.Max, e.RetryIn.Round(time.Millisecond))
+	case e.GaveUp:
+		return fmt.Sprintf("%s; giving up after %d restarts", what, e.Max)
+	}
+	return what
 }

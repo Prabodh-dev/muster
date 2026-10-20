@@ -2,14 +2,17 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/Prabodh-dev/muster/internal/proc"
 	"github.com/charmbracelet/lipgloss"
 )
 
 const (
-	minSidebar = 16
-	maxSidebar = 32
+	minSidebar = 28
+	maxSidebar = 40
 )
 
 var (
@@ -62,13 +65,19 @@ func (m Model) logSize() (int, int) {
 func renderView(m Model) string {
 	inner := m.sidebarWidth() - 2
 	rows := []string{titleStyle.Render("muster"), ""}
+	now := time.Now()
 	for i, st := range m.states {
-		label := fmt.Sprintf("%s %s", indicator(st.Status), st.Name)
-		label = lipgloss.NewStyle().MaxWidth(inner).Render(label)
+		name := fmt.Sprintf("%s %s", indicator(st.Status), st.Name)
+		detail := "  " + detailLine(st, now)
+		name = lipgloss.NewStyle().MaxWidth(inner).Render(name)
+		detail = lipgloss.NewStyle().MaxWidth(inner).Render(detail)
 		if i == m.selected {
-			label = selectedStyle.Width(inner).Render(label)
+			name = selectedStyle.Width(inner).Render(name)
+			detail = selectedStyle.Width(inner).Render(detail)
+		} else {
+			detail = helpStyle.Render(detail)
 		}
-		rows = append(rows, label)
+		rows = append(rows, name, detail)
 	}
 	sidebar := sidebarStyle.
 		Width(m.sidebarWidth() - 1).
@@ -82,6 +91,12 @@ func renderView(m Model) string {
 		status = fmt.Sprintf("crashed (exit %d)", cur.Code)
 	}
 	header := headerStyle.Render(cur.Name) + helpStyle.Render("  "+status)
+	if len(m.ports[cur.Name]) > 0 {
+		header += helpStyle.Render("  ports: " + joinInts(m.ports[cur.Name]))
+	}
+	if cur.Status == proc.Running && cur.HasStats && cur.Procs > 1 {
+		header += helpStyle.Render(fmt.Sprintf("  (%d processes)", cur.Procs))
+	}
 	if cur.Restarts > 0 {
 		header += helpStyle.Render(fmt.Sprintf("  restarts: %d", cur.Restarts))
 	}
@@ -115,4 +130,33 @@ func (m Model) matchSummary() string {
 		return "no matches"
 	}
 	return fmt.Sprintf("%d/%d", m.cur+1, len(m.log.matches))
+}
+
+// detailLine is the second sidebar line for a process: resource use and
+// uptime while it runs, otherwise what state it is in.
+func detailLine(st *proc.State, now time.Time) string {
+	switch st.Status {
+	case proc.Running:
+		up := formatUptime(st.Uptime(now))
+		if !st.HasStats {
+			return up
+		}
+		return fmt.Sprintf("%s · %s · %s", formatCPU(st.CPU), formatBytes(st.RSS), up)
+	case proc.Exited:
+		return "exited"
+	case proc.Crashed:
+		return fmt.Sprintf("crashed (exit %d)", st.Code)
+	case proc.Restarting:
+		return "restarting…"
+	default:
+		return st.Status.String()
+	}
+}
+
+func joinInts(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ", ")
 }

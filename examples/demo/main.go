@@ -6,6 +6,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,7 +18,18 @@ func main() {
 	every := flag.Duration("every", time.Second, "delay between lines")
 	count := flag.Int("count", 0, "number of lines to print before exiting (0 = run until stopped)")
 	exit := flag.Int("exit", 0, "exit code to use once -count lines have been printed")
+	listen := flag.String("listen", "", "TCP address to hold open while running, e.g. 127.0.0.1:47001")
 	flag.Parse()
+
+	if *listen != "" {
+		l, err := net.Listen("tcp", *listen)
+		if err != nil {
+			fmt.Printf("%s: cannot listen on %s: %v\n", *name, *listen, err)
+			os.Exit(1)
+		}
+		defer l.Close()
+		fmt.Printf("%s: listening on %s\n", *name, l.Addr())
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

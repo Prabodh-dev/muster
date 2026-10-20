@@ -34,7 +34,7 @@ func newModel(t *testing.T, procs ...config.Process) (Model, *proc.Supervisor) {
 	}
 	sup := proc.New(&config.Config{BufferLines: 100, Processes: procs})
 	t.Cleanup(sup.Shutdown)
-	m := New(sup)
+	m := New(sup, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return next.(Model), sup
 }
@@ -294,4 +294,25 @@ func hasLinePrefix(st *proc.State, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func TestSidebarShowsResourcesAndUptime(t *testing.T) {
+	m, sup := newModel(t,
+		config.Process{Name: "web", Command: "sleep 30"},
+		config.Process{Name: "idle", Command: "exit 0"},
+	)
+	m = pumpUntil(t, m, sup, func(m Model) bool {
+		return m.states[0].Status == proc.Running && m.states[1].Status == proc.Exited
+	})
+	sup.Apply(proc.StatsEvent{Proc: "web", CPU: 2.34, RSS: 145 << 20, Procs: 3})
+
+	v := m.View()
+	for _, want := range []string{"2.3%", "145MB", "0s", "exited"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("sidebar missing %q:\n%s", want, v)
+		}
+	}
+	if !strings.Contains(v, "3 processes") {
+		t.Errorf("header should note the process tree:\n%s", v)
+	}
 }

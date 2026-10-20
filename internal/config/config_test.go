@@ -68,9 +68,9 @@ func TestParseErrors(t *testing.T) {
 		{"process not map", "processes:\n  web: npm start\n", `"web" must be a mapping`},
 		{"duplicate", "processes:\n  a:\n    command: x\n  a:\n    command: y\n", "duplicate"},
 		{"unknown field", "processes:\n  a:\n    command: x\n    cmd: y\n", `unknown field "cmd"`},
-		{"unknown top-level", "procesess: {}\n", "invalid yaml"},
-		{"negative buffer", "buffer_lines: -1\nprocesses:\n  a:\n    command: x\n", "buffer_lines"},
-		{"bad env type", "processes:\n  a:\n    command: x\n    env: [1]\n", "process"},
+		{"unknown top-level", "procesess: {}\n", `line 1: unknown field "procesess"`},
+		{"negative buffer", "buffer_lines: -1\nprocesses:\n  a:\n    command: x\n", "line 1: buffer_lines must be at least 1"},
+		{"bad env type", "processes:\n  a:\n    command: x\n    env: [1]\n", "line 4: env must be a mapping"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -178,5 +178,97 @@ processes:
 		if _, err := Parse([]byte(bad), "/x"); err == nil {
 			t.Errorf("expected error for %q", bad)
 		}
+	}
+}
+
+func TestObservabilityFields(t *testing.T) {
+	src := `
+stats_interval_seconds: 1.5
+logs:
+  enabled: true
+  dir: out/logs
+processes:
+  web:
+    command: x
+    ports: [3000, 8080]
+  api:
+    command: y
+`
+	cfg, err := Parse([]byte(src), "/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StatsInterval != 1500*time.Millisecond {
+		t.Errorf("StatsInterval = %v", cfg.StatsInterval)
+	}
+	if !cfg.Logs.Enabled || cfg.Logs.Dir != filepath.Join("/proj", "out", "logs") {
+		t.Errorf("Logs = %+v", cfg.Logs)
+	}
+	if got := cfg.Processes[0].Ports; len(got) != 2 || got[0] != 3000 || got[1] != 8080 {
+		t.Errorf("ports = %v", got)
+	}
+	if len(cfg.Processes[1].Ports) != 0 {
+		t.Errorf("ports should be optional, got %v", cfg.Processes[1].Ports)
+	}
+}
+
+func TestObservabilityDefaults(t *testing.T) {
+	cfg, err := Parse([]byte("processes:\n  a:\n    command: x\n"), "/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StatsInterval != DefaultStatsInterval {
+		t.Errorf("StatsInterval = %v", cfg.StatsInterval)
+	}
+	if cfg.Logs.Enabled {
+		t.Error("log files should be off by default")
+	}
+	if want := filepath.Join("/proj", ".muster", "logs"); cfg.Logs.Dir != want {
+		t.Errorf("default log dir = %q, want %q", cfg.Logs.Dir, want)
+	}
+
+	cfg, err = Parse([]byte("stats_interval_seconds: 0\nprocesses:\n  a:\n    command: x\n"), "/proj")
+	if err != nil || cfg.StatsInterval != 0 {
+		t.Errorf("0 should switch sampling off: %v %v", cfg.StatsInterval, err)
+	}
+}
+
+func TestObservabilityErrors(t *testing.T) {
+	proc := "processes:\n  web:\n    command: x\n"
+	tests := []struct {
+		name, src, want string
+	}{
+		{"port zero", "processes:\n  web:\n    command: x\n    ports: [0]\n", "line 4: port must be between 1 and 65535, got 0"},
+		{"port too big", "processes:\n  web:\n    command: x\n    ports: [3000, 70000]\n", "line 4: port must be between 1 and 65535, got 70000"},
+		{"port not a number", "processes:\n  web:\n    command: x\n    ports: [http]\n", `port must be a whole number, got "http"`},
+		{"port fractional", "processes:\n  web:\n    command: x\n    ports: [80.5]\n", "port must be a whole number"},
+		{"ports not a list", "processes:\n  web:\n    command: x\n    ports: 3000\n", "line 4: ports must be a list"},
+		{"port repeated", "processes:\n  web:\n    command: x\n    ports:\n      - 3000\n      - 3000\n", "line 6: port 3000 is listed twice"},
+		{"port shared", "processes:\n  a:\n    command: x\n    ports: [3000]\n  b:\n    command: y\n    ports: [3000]\n", `line 6: process "b": port 3000 is already declared by process "a"`},
+		{"interval text", "stats_interval_seconds: soon\n" + proc, `line 1: stats_interval_seconds must be a number, got "soon"`},
+		{"interval negative", "stats_interval_seconds: -2\n" + proc, "line 1: stats_interval_seconds must be 0"},
+		{"interval too fast", "stats_interval_seconds: 0.1\n" + proc, "line 1: stats_interval_seconds must be 0"},
+		{"interval too slow", "stats_interval_seconds: 99999\n" + proc, "stats_interval_seconds must be 0"},
+		{"buffer text", "buffer_lines: lots\n" + proc, `line 1: buffer_lines must be a whole number, got "lots"`},
+		{"buffer zero", "buffer_lines: 0\n" + proc, "line 1: buffer_lines must be at least 1"},
+		{"logs not a map", "logs: yes\n" + proc, `line 1: "logs" must be a mapping`},
+		{"logs enabled text", "logs:\n  enabled: maybe\n" + proc, `line 2: logs.enabled must be true or false, got "maybe"`},
+		{"logs unknown key", "logs:\n  path: x\n" + proc, `line 2: unknown field "path"`},
+		{"logs empty dir", "logs:\n  dir: \"\"\n" + proc, "line 2: logs.dir must not be empty"},
+		{"grace text", "processes:\n  web:\n    command: x\n    grace_period_seconds: soon\n", "line 4: grace_period_seconds must be a number"},
+		{"restart policy line", "processes:\n  web:\n    command: x\n    restart: sometimes\n", "line 4: restart must be never"},
+		{"max restarts text", "processes:\n  web:\n    command: x\n    max_restarts: many\n", "line 4: max_restarts must be a whole number"},
+		{"top level not a map", "- a\n- b\n", "line 1: config must be a mapping"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse([]byte(tt.src), "/x")
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not contain %q", err, tt.want)
+			}
+		})
 	}
 }
