@@ -93,3 +93,30 @@ func TestConflictStringWithoutHolder(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// answers is the path that matters on macOS and Windows, where binding the
+// wildcard address succeeds even though a loopback-only listener holds the
+// port. Testing it directly makes that path covered on every platform.
+func TestAnswersFindsLoopbackListeners(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:0", "[::1]:0", ":0"} {
+		t.Run(addr, func(t *testing.T) {
+			port := listen(t, addr)
+			if !answers(port) {
+				t.Errorf("a listener on %s should be found by connecting", addr)
+			}
+		})
+	}
+}
+
+func TestAnswersIgnoresFreePorts(t *testing.T) {
+	if answers(freePort(t)) {
+		t.Error("nothing listens on a free port")
+	}
+}
+
+func TestLocalHostsIncludesLoopback(t *testing.T) {
+	got := strings.Join(localHosts(), " ")
+	if !strings.Contains(got, "127.0.0.1") || !strings.Contains(got, "::1") {
+		t.Errorf("localHosts() = %q", got)
+	}
+}
