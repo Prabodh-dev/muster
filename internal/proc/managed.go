@@ -169,6 +169,7 @@ func (m *managed) run() {
 			cancelRetry()
 			if inst != nil {
 				inst.stop(m.grace())
+				m.log.note("stopped (muster exiting)")
 			}
 			return
 

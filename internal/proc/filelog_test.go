@@ -198,3 +198,13 @@ func TestLogFileFlushedWhileProcessKeepsRunning(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestLogFileNotesShutdown(t *testing.T) {
+	dir := t.TempDir()
+	s := newLogTest(t, dir, 100, helperProc(t, "svc", "sleep", nil))
+	waitStart(t, s, "svc")
+	s.Shutdown()
+	if got := readLog(t, dir, "svc"); !strings.Contains(got, "] stopped (muster exiting)\n") {
+		t.Errorf("shutdown should be recorded:\n%s", got)
+	}
+}
