@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/Prabodh-dev/muster/internal/config"
@@ -24,6 +25,8 @@ type managed struct {
 	cmds     chan command
 	finished chan struct{}
 	tm       timing
+
+	pid atomic.Int64 // pid of the running child, or 0
 }
 
 func newManaged(cfg config.Process, out chan<- Event, quit <-chan struct{}, tm timing) *managed {
@@ -119,12 +122,14 @@ func (m *managed) run() {
 	start := func() {
 		var err error
 		inst, err = startInstance(m.cfg, m.out, m.quit, func(pid int) {
-			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: launches})
+			m.pid.Store(int64(pid))
+			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: launches, At: time.Now()})
 		})
 		launches++
 		startedAt = time.Now()
 		if err != nil {
 			inst = nil
+			m.pid.Store(0)
 			exited(exitInfo{code: -1, err: err}, 0)
 		}
 	}
@@ -133,6 +138,7 @@ func (m *managed) run() {
 		inst.stop(m.grace())
 		m.emit(ExitEvent{Proc: m.cfg.Name, Code: inst.res.code, Stopped: true})
 		inst = nil
+		m.pid.Store(0)
 	}
 	// fresh begins a new run on the user's initiative, forgetting past failures.
 	fresh := func() {
@@ -179,6 +185,7 @@ func (m *managed) run() {
 		case <-done:
 			res := inst.res
 			inst = nil
+			m.pid.Store(0)
 			exited(res, time.Since(startedAt))
 
 		case <-retryC:

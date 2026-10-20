@@ -34,10 +34,17 @@ func run() error {
 		return err
 	}
 
+	ports := map[string][]int{}
+	for _, p := range cfg.Processes {
+		if len(p.Ports) > 0 {
+			ports[p.Name] = p.Ports
+		}
+	}
+
 	sup := proc.New(cfg)
 	// Covers every exit path, including the program being killed by a signal.
 	defer sup.Shutdown()
-	p := tea.NewProgram(tui.New(sup), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(tui.New(sup, ports), tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Bubble Tea handles SIGINT/SIGTERM itself; a closed terminal sends
 	// SIGHUP, which would otherwise kill us and orphan the children.

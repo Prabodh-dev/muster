@@ -24,6 +24,16 @@ type StartEvent struct {
 	Proc     string
 	PID      int
 	Restarts int // how many times it has been relaunched so far
+	At       time.Time
+}
+
+// StatsEvent is a periodic resource sample for a running process and its
+// descendants.
+type StatsEvent struct {
+	Proc  string
+	CPU   float64 // percent of one core, summed over the tree
+	RSS   uint64  // resident bytes, summed over the tree
+	Procs int     // processes in the tree
 }
 
 // ExitEvent is sent once per run, after the process's output has been
@@ -43,6 +53,7 @@ type ExitEvent struct {
 func (e LineEvent) ProcName() string  { return e.Proc }
 func (e StartEvent) ProcName() string { return e.Proc }
 func (e ExitEvent) ProcName() string  { return e.Proc }
+func (e StatsEvent) ProcName() string { return e.Proc }
 
 // Crashed reports whether the exit counts as a crash rather than a clean exit
 // or a requested stop.
