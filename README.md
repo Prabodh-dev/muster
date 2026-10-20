@@ -217,7 +217,7 @@ grandchild whose parent has already exited, and so was re-parented to init, is
 no longer counted, even though it is still in the process group or job object
 that muster stops. Doing it by process group or job membership would catch
 those, but the library used for sampling does not expose either on every
-platform. On Windows, walking the process table is also noticeably slower than
+platform. On Windows, walking the process table can be slower than
 on Linux, which is one more reason not to sample faster than you need.
 
 ### Port conflicts
