@@ -25,6 +25,8 @@ var (
 	runningDot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
 	exitedDot  = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("○")
 	crashedDot = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("✗")
+	stoppedDot = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("■")
+	retryDot   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("↻")
 )
 
 func indicator(s proc.Status) string {
@@ -33,6 +35,10 @@ func indicator(s proc.Status) string {
 		return runningDot
 	case proc.Exited:
 		return exitedDot
+	case proc.Stopped:
+		return stoppedDot
+	case proc.Restarting:
+		return retryDot
 	default:
 		return crashedDot
 	}
@@ -76,6 +82,9 @@ func renderView(m Model) string {
 		status = fmt.Sprintf("crashed (exit %d)", cur.Code)
 	}
 	header := headerStyle.Render(cur.Name) + helpStyle.Render("  "+status)
+	if cur.Restarts > 0 {
+		header += helpStyle.Render(fmt.Sprintf("  restarts: %d", cur.Restarts))
+	}
 	if d := cur.Dropped(); d > 0 {
 		header += helpStyle.Render(fmt.Sprintf("  (%d older lines dropped)", d))
 	}
@@ -84,6 +93,26 @@ func renderView(m Model) string {
 		m.vp.View(),
 	)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, " ", main)
-	help := helpStyle.Render("↑/↓ j/k select · pgup/pgdn scroll · g/G top/bottom · q quit")
-	return lipgloss.JoinVertical(lipgloss.Left, body, help)
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.footer())
+}
+
+// footer is the bottom line: the search prompt, the active search, or help.
+func (m Model) footer() string {
+	switch {
+	case m.prompting:
+		return m.input.View() + helpStyle.Render("  "+m.matchSummary()+"  enter keep · esc cancel")
+	case m.query != "":
+		return helpStyle.Render(fmt.Sprintf("/%s  %s  n/N next/prev · / edit · esc clear", m.query, m.matchSummary()))
+	}
+	return helpStyle.Render("j/k select · r restart · s stop · enter start · / search · pgup/pgdn scroll · q quit")
+}
+
+func (m Model) matchSummary() string {
+	if m.query == "" {
+		return ""
+	}
+	if len(m.log.matches) == 0 {
+		return "no matches"
+	}
+	return fmt.Sprintf("%d/%d", m.cur+1, len(m.log.matches))
 }

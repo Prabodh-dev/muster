@@ -1,10 +1,24 @@
-# Example config. Run `muster` from this directory.
+# Example config: run `muster` from the repository root.
+#
+# Every command here goes through `go run`, so it behaves the same under
+# /bin/sh and cmd.exe. Your own commands are handed to the OS's default shell
+# as-is, so keep shell-specific syntax out of a config you share across
+# platforms (see "Commands and the shell" in the README).
+
+grace_period_seconds: 5
+
 processes:
   clock:
-    command: while true; do date; sleep 1; done
+    command: go run ./examples/demo -name clock -every 1s
+
   greeter:
-    command: echo "hello from $NAME"
+    command: go run ./examples/demo -name greeter -count 2
     env:
-      NAME: muster
+      GREETING: hi from muster
+
   flaky:
-    command: echo "about to fail"; sleep 3; exit 1
+    # Exits non-zero after a few lines; muster brings it back with backoff
+    # until max_restarts is used up.
+    command: go run ./examples/demo -name flaky -count 3 -exit 1
+    restart: on-failure
+    max_restarts: 3

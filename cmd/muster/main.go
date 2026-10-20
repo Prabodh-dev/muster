@@ -36,7 +36,7 @@ func run() error {
 
 	sup := proc.New(cfg)
 	// Covers every exit path, including the program being killed by a signal.
-	defer sup.Stop()
+	defer sup.Shutdown()
 	p := tea.NewProgram(tui.New(sup), tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Bubble Tea handles SIGINT/SIGTERM itself; a closed terminal sends
