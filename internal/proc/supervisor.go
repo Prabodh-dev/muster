@@ -1,7 +1,6 @@
 package proc
 
 import (
-	"fmt"
 	"github.com/Prabodh-dev/muster/internal/stats"
 	"strconv"
 	"sync"
@@ -117,7 +116,17 @@ func newSupervisor(cfg *config.Config, tm timing) *Supervisor {
 		s.byName[pc.Name] = st
 	}
 	for _, pc := range cfg.Processes {
-		m := newManaged(pc, s.events, s.quit, tm)
+		var fl *fileLog
+		if cfg.Logs.Enabled {
+			var err error
+			if fl, err = openFileLog(cfg.Logs.Dir, pc.Name); err != nil {
+				s.byName[pc.Name].push("[muster] cannot write log file, continuing without it: " + err.Error())
+				fl = nil
+			} else {
+				s.byName[pc.Name].push("[muster] logging to " + fl.path)
+			}
+		}
+		m := newManaged(pc, s.events, s.quit, tm, fl)
 		s.procs[pc.Name] = m
 		go m.run()
 	}
@@ -163,23 +172,14 @@ func (s *Supervisor) Apply(ev Event) {
 		switch {
 		case e.Stopped:
 			st.Status = Stopped
-			st.push("[muster] stopped")
 		case e.RetryIn > 0:
 			st.Status = Restarting
-			st.push(fmt.Sprintf("[muster] %s; restart %d/%d in %s", describeExit(e), e.Attempt, e.Max, e.RetryIn.Round(time.Millisecond)))
-		case e.GaveUp:
-			st.Status = Crashed
-			if !e.Crashed() {
-				st.Status = Exited
-			}
-			st.push(fmt.Sprintf("[muster] %s; giving up after %d restarts", describeExit(e), e.Max))
 		case e.Crashed():
 			st.Status = Crashed
-			st.push("[muster] " + describeExit(e))
 		default:
 			st.Status = Exited
-			st.push("[muster] exited with code 0")
 		}
+		st.push("[muster] " + e.Summary())
 	}
 }
 
@@ -190,13 +190,6 @@ func (s *State) Uptime(now time.Time) time.Duration {
 		return 0
 	}
 	return max(now.Sub(s.StartedAt), 0)
-}
-
-func describeExit(e ExitEvent) string {
-	if e.Err != nil {
-		return e.Err.Error()
-	}
-	return "exited with code " + strconv.Itoa(e.Code)
 }
 
 func (s *State) push(line string) {

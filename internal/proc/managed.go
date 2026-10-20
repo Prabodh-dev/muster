@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -25,13 +26,15 @@ type managed struct {
 	cmds     chan command
 	finished chan struct{}
 	tm       timing
+	log      *fileLog // nil when log persistence is off
 
 	pid atomic.Int64 // pid of the running child, or 0
 }
 
-func newManaged(cfg config.Process, out chan<- Event, quit <-chan struct{}, tm timing) *managed {
+func newManaged(cfg config.Process, out chan<- Event, quit <-chan struct{}, tm timing, fl *fileLog) *managed {
 	return &managed{
 		tm:       tm,
+		log:      fl,
 		cfg:      cfg,
 		out:      out,
 		quit:     quit,
@@ -48,7 +51,13 @@ func (m *managed) command(c command) {
 	}
 }
 
-func (m *managed) emit(ev Event) { send(m.out, m.quit, ev) }
+// emit delivers ev to the UI and records exits in the log file.
+func (m *managed) emit(ev Event) {
+	if e, ok := ev.(ExitEvent); ok {
+		m.log.note(e.Summary())
+	}
+	send(m.out, m.quit, ev)
+}
 
 func (m *managed) grace() time.Duration {
 	if m.cfg.GracePeriod < 0 {
@@ -83,6 +92,7 @@ func (m *managed) wantsRestart(res exitInfo) bool {
 
 func (m *managed) run() {
 	defer close(m.finished)
+	defer m.log.close()
 
 	var (
 		inst      *instance
@@ -121,7 +131,8 @@ func (m *managed) run() {
 	}
 	start := func() {
 		var err error
-		inst, err = startInstance(m.cfg, m.out, m.quit, func(pid int) {
+		inst, err = startInstance(m.cfg, m.out, m.quit, m.log, func(pid int) {
+			m.log.note("started (pid " + strconv.Itoa(pid) + ")")
 			m.pid.Store(int64(pid))
 			m.emit(StartEvent{Proc: m.cfg.Name, PID: pid, Restarts: launches, At: time.Now()})
 		})

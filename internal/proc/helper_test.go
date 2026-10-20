@@ -63,6 +63,13 @@ func runHelper(mode string) {
 			}
 		}
 
+	case "lines":
+		n, _ := strconv.Atoi(os.Getenv("MUSTER_TEST_LINES"))
+		for i := 1; i <= n; i++ {
+			fmt.Println("line " + strconv.Itoa(i))
+		}
+		time.Sleep(10 * time.Minute)
+
 	case "exit":
 		code, _ := strconv.Atoi(os.Getenv("MUSTER_TEST_EXIT"))
 		fmt.Println("running")

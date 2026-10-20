@@ -4,6 +4,7 @@ package proc
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -64,4 +65,21 @@ func (e ExitEvent) String() string {
 		return fmt.Sprintf("%s: %v", e.Proc, e.Err)
 	}
 	return fmt.Sprintf("%s: exit %d", e.Proc, e.Code)
+}
+
+// Summary describes the exit in words, for logs.
+func (e ExitEvent) Summary() string {
+	what := "exited with code " + strconv.Itoa(e.Code)
+	if e.Err != nil {
+		what = e.Err.Error()
+	}
+	switch {
+	case e.Stopped:
+		return "stopped"
+	case e.RetryIn > 0:
+		return fmt.Sprintf("%s; restart %d/%d in %s", what, e.Attempt, e.Max, e.RetryIn.Round(time.Millisecond))
+	case e.GaveUp:
+		return fmt.Sprintf("%s; giving up after %d restarts", what, e.Max)
+	}
+	return what
 }

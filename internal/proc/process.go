@@ -49,7 +49,7 @@ type exitInfo struct {
 // pipe and starts the goroutine that reads it. started is called with the pid
 // before any output is delivered. Events go to out; delivery is abandoned if
 // quit is closed so a departed consumer never wedges the reader.
-func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, started func(pid int)) (*instance, error) {
+func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, fl *fileLog, started func(pid int)) (*instance, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("creating pipe: %w", err)
@@ -93,7 +93,7 @@ func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, s
 	pumped := make(chan struct{})
 	go func() {
 		defer close(pumped)
-		pump(r, cfg.Name, out, quit)
+		pump(r, cfg.Name, out, quit, fl)
 	}()
 
 	go func() {
@@ -131,17 +131,30 @@ func startInstance(cfg config.Process, out chan<- Event, quit <-chan struct{}, s
 	return inst, nil
 }
 
-// pump reads lines from r until EOF and sends each as a LineEvent.
-func pump(r io.Reader, name string, out chan<- Event, quit <-chan struct{}) {
+// pump reads lines from r until EOF, appends them to fl (if any) and sends
+// each as a LineEvent. The file is written first, so output reaches disk even
+// if the UI is behind or gone.
+func pump(r io.Reader, name string, out chan<- Event, quit <-chan struct{}, fl *fileLog) {
 	br := bufio.NewReaderSize(r, 4096)
 	var pending strings.Builder
+	warned := false
 	for {
 		chunk, isPrefix, err := br.ReadLine()
 		if err != nil {
 			if pending.Len() > 0 {
 				send(out, quit, LineEvent{Proc: name, Text: pending.String()})
 			}
+			fl.flush()
 			return
+		}
+		// The file gets the line verbatim, however long; only the in-memory
+		// copy is split at maxLine.
+		if werr := fl.write(string(chunk), !isPrefix); werr != nil && !warned {
+			warned = true
+			send(out, quit, LineEvent{Proc: name, Text: "[muster] log file write failed, no longer saving: " + werr.Error()})
+		}
+		if !isPrefix && br.Buffered() == 0 {
+			fl.flush() // about to block waiting for more output
 		}
 		pending.Write(chunk)
 		if isPrefix && pending.Len() < maxLine {
