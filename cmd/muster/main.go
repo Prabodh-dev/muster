@@ -23,8 +23,9 @@ func main() {
 
 func run() error {
 	path := flag.String("f", config.DefaultFile, "path to the config file")
+	force := flag.Bool("ignore-port-conflicts", false, "start even if a declared port is already in use")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: muster [-f %s]\n", config.DefaultFile)
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: muster [-f %s] [-ignore-port-conflicts]\n", config.DefaultFile)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -32,6 +33,12 @@ func run() error {
 	cfg, err := config.Load(*path)
 	if err != nil {
 		return err
+	}
+
+	// Before spawning anything, so a clash is explained rather than left to
+	// show up as two confusing crashes.
+	if err := checkPorts(cfg.Processes, *force, isTerminal(os.Stdin), os.Stdin, os.Stderr); err != nil {
+		os.Exit(1)
 	}
 
 	ports := map[string][]int{}
@@ -57,4 +64,9 @@ func run() error {
 
 	_, err = p.Run()
 	return err
+}
+
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
