@@ -24,12 +24,18 @@ func main() {
 
 func run() error {
 	path := flag.String("f", config.DefaultFile, "path to the config file")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	force := flag.Bool("ignore-port-conflicts", false, "start even if a declared port is already in use")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: muster [-f %s] [-ignore-port-conflicts]\n", config.DefaultFile)
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: muster [-f %s] [-ignore-port-conflicts] [-version]\n", config.DefaultFile)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(versionString())
+		return nil
+	}
 
 	cfg, err := config.Load(*path)
 	if err != nil {
