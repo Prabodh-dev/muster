@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest an improvement or a new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation and what is awkward or impossible today. The problem matters more than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like muster to do?
+      description: A rough idea is fine, for example a config snippet or a key binding.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried or considered instead?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I would be willing to work on this and open a pull request
