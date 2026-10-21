@@ -13,19 +13,19 @@ logs:
 
 processes:
   clock:
-    command: go run ./examples/demo -name clock -every 1s -listen 127.0.0.1:47001
+    command: go run ./examples/demo/main.go -name clock -every 1s -listen 127.0.0.1:47001
     # muster checks this port before starting anything and warns if
     # something else already has it.
     ports: [47001]
 
   greeter:
-    command: go run ./examples/demo -name greeter -count 2
+    command: go run ./examples/demo/main.go -name greeter -count 2
     env:
       GREETING: hi from muster
 
   flaky:
     # Exits non-zero after a few lines; muster brings it back with backoff
     # until max_restarts is used up.
-    command: go run ./examples/demo -name flaky -count 3 -exit 1
+    command: go run ./examples/demo/main.go -name flaky -count 3 -exit 1
     restart: on-failure
     max_restarts: 3
