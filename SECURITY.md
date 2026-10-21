@@ -72,8 +72,9 @@ These are current behaviours, listed so you can make informed choices.
 - **Port checks.** muster tries to bind, and to connect to, the ports you
   declare under `ports:` on this machine's own addresses before starting
   anything. It makes no connections to other hosts.
-- **Network.** muster itself opens no listening sockets, makes no outbound
-  connections of its own, sends no telemetry and does not update itself.
+- **Network.** Apart from the momentary bind-and-release used to test a
+  declared port, muster opens no listening sockets. It makes no connections
+  to other hosts, sends no telemetry and does not update itself.
 - **Terminal output.** Child output is shown in your terminal. muster does not
   currently filter terminal escape sequences from it.
 
