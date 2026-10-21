@@ -68,7 +68,7 @@ func TestParseErrors(t *testing.T) {
 		{"process not map", "processes:\n  web: npm start\n", `"web" must be a mapping`},
 		{"duplicate", "processes:\n  a:\n    command: x\n  a:\n    command: y\n", "duplicate"},
 		{"unknown field", "processes:\n  a:\n    command: x\n    cmd: y\n", `unknown field "cmd"`},
-		{"unknown top-level", "procesess: {}\n", `line 1: unknown field "procesess"`},
+		{"unknown top-level", "bogus_key: {}\n", `line 1: unknown field "bogus_key"`},
 		{"negative buffer", "buffer_lines: -1\nprocesses:\n  a:\n    command: x\n", "line 1: buffer_lines must be at least 1"},
 		{"bad env type", "processes:\n  a:\n    command: x\n    env: [1]\n", "line 4: env must be a mapping"},
 	}

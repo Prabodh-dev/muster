@@ -198,10 +198,7 @@ func (i *instance) stop(grace time.Duration) {
 	tick := time.NewTicker(pollInterval)
 	defer tick.Stop()
 wait:
-	for {
-		if i.leaderGone() && i.group.empty() {
-			break
-		}
+	for !i.leaderGone() || !i.group.empty() {
 		select {
 		case <-expire.C:
 			break wait
