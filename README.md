@@ -106,7 +106,7 @@ warn about an unrecognised publisher.
 
 ### With Go
 
-Requires Go 1.24 or newer.
+Requires Go 1.26 or newer.
 
 ```sh
 go install github.com/Prabodh-dev/muster/cmd/muster@latest

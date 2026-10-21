@@ -10,7 +10,7 @@ open a public issue.
 
 ## Building and testing
 
-You need Go 1.24 or newer. Nothing else is required.
+You need Go 1.26 or newer. Nothing else is required.
 
 ```sh
 git clone https://github.com/Prabodh-dev/muster

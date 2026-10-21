@@ -44,7 +44,7 @@ jobs:
           go mod verify
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.5.0
+          version: v2.15.0
           # Skip the action's `config verify` step, which downloads a JSON
           # schema from golangci-lint.run and times out when that is slow.
           # golangci-lint still rejects an invalid config when it runs.
@@ -67,7 +67,7 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.5.0
+          version: v2.15.0
           # Skip the action's `config verify` step, which downloads a JSON
           # schema from golangci-lint.run and times out when that is slow.
           # golangci-lint still rejects an invalid config when it runs.
