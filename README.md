@@ -4,7 +4,7 @@
 pane per process, and live control over each of them: restart, stop, search,
 and see what is using your CPU, without a pile of terminal tabs.
 
-[![ci](https://github.com/Prabodh-dev/muster/actions/workflows/ci.yml/badge.svg)](https://github.com/Prabodh-dev/muster/actions/workflows/ci.yml)
+[![ci](https://github.com/Prabodh-dev/muster/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Prabodh-dev/muster/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Prabodh-dev/muster?include_prereleases)](https://github.com/Prabodh-dev/muster/releases)
 [![license](https://img.shields.io/github/license/Prabodh-dev/muster)](LICENSE)
 
@@ -78,13 +78,22 @@ which process is running, exited cleanly, or crashed.
 
 Grab the archive for your platform from the
 [Releases page](https://github.com/Prabodh-dev/muster/releases). Builds are
-published for Linux, macOS and Windows on `amd64` and `arm64`, together with a
-`muster_<version>_checksums.txt` file.
+published for Linux, macOS and Windows, each as `amd64` and `arm64`, together
+with a `muster_<version>_checksums.txt` file.
 
-**Linux and macOS** (replace the version, OS and architecture):
+**`amd64` or `arm64`?** Most machines are `amd64` (Intel/AMD: nearly all
+Windows PCs, most Linux machines, older Intel Macs). Pick `arm64` only on ARM
+hardware: Apple Silicon Macs (M1 and later), a Raspberry Pi on a 64-bit OS, or
+an ARM-based Windows device such as the Surface Pro X. Not sure? Run
+`uname -m` (`x86_64` means amd64, `arm64` or `aarch64` means arm64), or on
+Windows check *Settings → System → About → System type*.
+
+**Linux and macOS** (this picks your OS and architecture for you):
 
 ```sh
-VERSION=1.0.0 OS=linux ARCH=amd64      # OS: linux | darwin   ARCH: amd64 | arm64
+VERSION=0.1.0                                               # latest: see the Releases page
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux | darwin
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')  # amd64 | arm64
 BASE=https://github.com/Prabodh-dev/muster/releases/download/v$VERSION
 curl -LO $BASE/muster_${VERSION}_${OS}_${ARCH}.tar.gz
 curl -LO $BASE/muster_${VERSION}_checksums.txt
@@ -95,8 +104,9 @@ sudo mv muster /usr/local/bin/
 muster -version
 ```
 
-**Windows**: download `muster_<version>_windows_amd64.zip` (or `arm64`),
-unzip it, and put `muster.exe` somewhere on your `PATH`. To verify it, compare
+**Windows**: download `muster_<version>_windows_amd64.zip` (only choose the
+`arm64` one on an ARM-based device), unzip it, and put `muster.exe` somewhere
+on your `PATH`. To verify it, compare
 `Get-FileHash muster_<version>_windows_amd64.zip` with the checksums file.
 
 The binaries are not code-signed. macOS may block the first run; allow it in
