@@ -54,5 +54,5 @@ body:
     id: logs
     attributes:
       label: Output or log file
-      description: Anything useful from the screen, or from the process's log file if you have `logs.enabled: true`. Paste as text rather than a screenshot where you can.
+      description: "Anything useful from the screen, or from the process's log file if you have `logs.enabled: true`. Paste as text rather than a screenshot where you can."
       render: text
