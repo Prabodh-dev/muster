@@ -1,32 +1,110 @@
 # muster
 
-Run your whole local dev stack from one terminal window.
+**Run your whole local dev stack from one terminal.** One config file, a log
+pane per process, and live control over each of them: restart, stop, search,
+and see what is using your CPU, without a pile of terminal tabs.
 
-`muster` reads a config file, starts every process listed in it (frontend dev
-server, API, worker, ...), and shows them in a small TUI: a sidebar with each
-process and its status, and a log pane for whichever one you have selected.
-Quit and everything it started goes away with it.
+[![ci](https://github.com/Prabodh-dev/muster/actions/workflows/ci.yml/badge.svg)](https://github.com/Prabodh-dev/muster/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Prabodh-dev/muster?include_prereleases)](https://github.com/Prabodh-dev/muster/releases)
+[![license](https://img.shields.io/github/license/Prabodh-dev/muster)](LICENSE)
 
-## Why
+![muster running four processes: browsing logs, a crash being caught and restarted, searching, and stopping and starting a process](docs/demo.gif)
 
-You already have options for this; muster is a different set of trade-offs.
+```yaml
+# muster.yaml
+processes:
+  frontend:
+    command: npm run dev
+    cwd: ./web
+  backend:
+    command: go run ./cmd/api
+    ports: [8080]
+    restart: on-failure
+  worker:
+    command: go run ./cmd/worker
+```
 
-- **Multiple terminal tabs** – works until you have five of them and forget
-  which one died.
+```sh
+muster
+```
+
+> **muster runs the commands in `muster.yaml`.** Treat that file like a
+> `Makefile` or an npm install script: never run one from a repository you do
+> not trust. See [SECURITY.md](SECURITY.md).
+
+## Why muster
+
+You already have options; muster makes different trade-offs.
+
+- **Multiple terminal tabs** work until you have five of them and forget which
+  one died.
 - **[concurrently](https://github.com/open-cli-tools/concurrently) /
-  [foreman](https://github.com/ddollar/foreman)** – start everything and
+  [foreman](https://github.com/ddollar/foreman)** start everything and
   interleave all output into one stream, prefixed by name. Fine for three
   quiet processes, hard to read when two are chatty and one is the one you
   care about.
-- **[overmind](https://github.com/DarthSim/overmind)** – gives each process
-  its own pane, but does it by running them inside tmux, so you need tmux
+- **[overmind](https://github.com/DarthSim/overmind)** gives each process its
+  own pane, but does it by running them inside tmux, so you need tmux
   installed and it is Unix-only.
 
-muster keeps each process's output separate (like overmind) without tmux, in a
-single static Go binary, and tells you at a glance which process is running,
-exited cleanly, or crashed.
+muster keeps each process's output separate (like overmind) without tmux, as a
+single static binary for Linux, macOS and Windows, and tells you at a glance
+which process is running, exited cleanly, or crashed.
+
+## Features
+
+- **A log pane per process**, with a sidebar showing status at a glance
+  (running, exited, crashed, stopped, restarting).
+- **Restart, stop or start any one process** with a key press, without
+  touching the others.
+- **Graceful shutdown of the whole process tree**, not just the top-level
+  process, so a dev server's children do not linger holding your port.
+  Configurable grace period, then a force kill. Quitting muster leaves nothing
+  behind.
+- **Restart policies** (`never`, `on-failure`, `always`) with exponential
+  backoff and a cap, so a crash loop cannot spam.
+- **CPU, memory and uptime** for each process, summed over its whole tree.
+- **Log search** with highlighting and next/previous match.
+- **Port-conflict detection**: declare a process's `ports` and muster warns
+  you *before* starting anything if one is already taken.
+- **Optional log files** per process, for debugging after a crash.
+- **Config errors with line numbers**, and a config format that is a short
+  YAML file.
+- One dependency-free binary; no tmux, no runtime.
 
 ## Install
+
+### Download a release binary
+
+Grab the archive for your platform from the
+[Releases page](https://github.com/Prabodh-dev/muster/releases). Builds are
+published for Linux, macOS and Windows on `amd64` and `arm64`, together with a
+`muster_<version>_checksums.txt` file.
+
+**Linux and macOS** (replace the version, OS and architecture):
+
+```sh
+VERSION=1.0.0 OS=linux ARCH=amd64      # OS: linux | darwin   ARCH: amd64 | arm64
+BASE=https://github.com/Prabodh-dev/muster/releases/download/v$VERSION
+curl -LO $BASE/muster_${VERSION}_${OS}_${ARCH}.tar.gz
+curl -LO $BASE/muster_${VERSION}_checksums.txt
+
+sha256sum -c --ignore-missing muster_${VERSION}_checksums.txt   # macOS: shasum -a 256 -c --ignore-missing ...
+tar xzf muster_${VERSION}_${OS}_${ARCH}.tar.gz
+sudo mv muster /usr/local/bin/
+muster -version
+```
+
+**Windows**: download `muster_<version>_windows_amd64.zip` (or `arm64`),
+unzip it, and put `muster.exe` somewhere on your `PATH`. To verify it, compare
+`Get-FileHash muster_<version>_windows_amd64.zip` with the checksums file.
+
+The binaries are not code-signed. macOS may block the first run; allow it in
+*System Settings → Privacy & Security*, or run
+`xattr -d com.apple.quarantine /usr/local/bin/muster`. Windows SmartScreen may
+warn about an unrecognised publisher.
+
+### With Go
 
 Requires Go 1.24 or newer.
 
@@ -34,9 +112,11 @@ Requires Go 1.24 or newer.
 go install github.com/Prabodh-dev/muster/cmd/muster@latest
 ```
 
-Or from a checkout:
+### From source
 
 ```sh
+git clone https://github.com/Prabodh-dev/muster
+cd muster
 go build -o muster ./cmd/muster
 ```
 
@@ -62,10 +142,20 @@ go build -o muster ./cmd/muster
    muster                         # uses ./muster.yaml
    muster -f path/to/other.yaml
    muster -ignore-port-conflicts  # start even if a declared port is taken
+   muster -version
    ```
 
-   This repository's own `muster.yaml` is a runnable example:
-   `go run ./cmd/muster` from a checkout starts three demo processes.
+3. Press `j`/`k` to move between processes, `r` to restart the selected one,
+   `s` to stop it, `/` to search its log, and `q` to quit (which stops
+   everything).
+
+   Want to see it work before writing a config? This repository's own
+   `muster.yaml` is a runnable demo (it needs Go installed, because it runs
+   a tiny program through `go run`): clone the repo and run `go run
+   ./cmd/muster`, or unpack a release archive, which includes the same demo
+   config, and run `./muster` in the extracted folder.
+
+## Using muster
 
 ### Keys
 
@@ -115,7 +205,7 @@ Status indicators: `●` running, `○` exited with code 0, `✗` crashed (non-z
 exit code, killed by a signal, or failed to start), `■` stopped by you, `↻`
 waiting to be restarted automatically.
 
-## Config format
+## Configuration
 
 muster uses **`muster.yaml`**. Unknown keys are rejected, so typos are caught
 instead of silently ignored.
@@ -321,22 +411,22 @@ exiting.
   hides non-matching lines is not implemented yet.
 - Resource figures follow parent pids, so a grandchild whose parent has
   exited is not counted (see "Resource usage and uptime").
-- Port checks are TCP only and happen once, at startup.
-- Log files are not rotated.
+- Port checks are TCP only and happen once, at startup, not when a process
+  is restarted ([#5](https://github.com/Prabodh-dev/muster/issues/5)).
+- Log files are not rotated ([#4](https://github.com/Prabodh-dev/muster/issues/4))
+  and are created with default permissions
+  ([#6](https://github.com/Prabodh-dev/muster/issues/6)).
 - Restart backoff timings (1s doubling to 30s, 10s to count as healthy) are
   fixed rather than configurable.
 
-## Development
+## Contributing
 
-```sh
-go vet ./...
-go test -race ./...
-```
-
-The process-control tests re-run the test binary as a stand-in dev server
-(one that spawns children, ignores signals, or exits with a chosen code), so
-they need no shell tools and run the same on every platform.
+Contributions are welcome, from typo fixes to new features. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and lint, the
+conventions the project follows, and good places to start. Please also read the
+[Code of Conduct](CODE_OF_CONDUCT.md). To report a security problem, follow
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).

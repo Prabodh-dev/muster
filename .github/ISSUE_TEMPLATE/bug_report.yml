@@ -1,0 +1,58 @@
+name: Bug report
+description: Something does not work the way the README says it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. A good report lets someone reproduce the
+        problem without asking you questions.
+
+        **Security problems:** please do not report them here. Follow
+        [SECURITY.md](https://github.com/Prabodh-dev/muster/blob/main/SECURITY.md).
+        Note that muster running the commands in a `muster.yaml` is intended
+        behaviour, not a vulnerability.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      placeholder: "I pressed `r` on the backend and ... I expected ..."
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Your muster.yaml
+      description: The smallest config that shows the problem. Remove anything sensitive (tokens, internal hostnames).
+      render: yaml
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Output of `muster -version`
+      placeholder: muster 1.2.3 (abc1234, 2026-01-01T00:00:00Z)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other (say which below)
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and shell
+      description: For example "iTerm2 + zsh", "Windows Terminal + PowerShell", "tmux inside Alacritty".
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or log file
+      description: "Anything useful from the screen, or from the process's log file if you have `logs.enabled: true`. Paste as text rather than a screenshot where you can."
+      render: text

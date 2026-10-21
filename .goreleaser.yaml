@@ -1,0 +1,51 @@
+version: 2
+
+project_name: muster
+
+builds:
+  - id: muster
+    main: ./cmd/muster
+    binary: muster
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: muster
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "muster_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - SECURITY.md
+      # Laid out so `./muster` works from the extracted folder as a demo
+      # (the example config runs examples/demo through `go run`).
+      - muster.yaml
+      - src: examples/demo/main.go
+        dst: examples/demo/main.go
+
+checksum:
+  name_template: "muster_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs?:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"
+
+release:
+  prerelease: auto

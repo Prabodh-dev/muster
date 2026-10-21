@@ -1,10 +1,11 @@
 package proc
 
 import (
-	"github.com/Prabodh-dev/muster/internal/stats"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/Prabodh-dev/muster/internal/stats"
 
 	"github.com/Prabodh-dev/muster/internal/config"
 	"github.com/Prabodh-dev/muster/internal/ringbuf"

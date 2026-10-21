@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -19,3 +22,66 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go.mod is tidy and verified
+        run: |
+          go mod tidy -diff
+          go mod verify
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          # Skip the action's `config verify` step, which downloads a JSON
+          # schema from golangci-lint.run and times out when that is slow.
+          # golangci-lint still rejects an invalid config when it runs.
+          verify: false
+
+  # Lint the platform-specific files too: the Linux run above never compiles
+  # the Windows and macOS code paths.
+  lint-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [windows, darwin]
+    runs-on: ubuntu-latest
+    env:
+      GOOS: ${{ matrix.goos }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          # Skip the action's `config verify` step, which downloads a JSON
+          # schema from golangci-lint.run and times out when that is slow.
+          # golangci-lint still rejects an invalid config when it runs.
+          verify: false
+
+  # Known vulnerabilities in dependencies and in the Go standard library the
+  # release binaries are built with. This uses the newest Go release (not the
+  # minimum in go.mod) so that standard-library fixes count.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - run: govulncheck ./...
