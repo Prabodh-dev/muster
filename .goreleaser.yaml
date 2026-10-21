@@ -27,6 +27,7 @@ archives:
     files:
       - LICENSE
       - README.md
+      - SECURITY.md
       # Laid out so `./muster` works from the extracted folder as a demo
       # (the example config runs examples/demo through `go run`).
       - muster.yaml
