@@ -1,0 +1,54 @@
+# Fixture for the terminal recording (docs/demo/demo.tape). It uses sh loops to
+# fake the output of a typical dev stack, so it is for Linux/macOS only; for a
+# config you can run anywhere, see the muster.yaml in the repository root.
+grace_period_seconds: 1
+stats_interval_seconds: 1
+
+processes:
+  web:
+    command: |
+      echo "  VITE v5.4.2  ready in 312 ms"
+      echo "  > Local:   http://localhost:3000/"
+      i=0
+      while true; do
+        i=$((i+1))
+        echo "[hmr] updated /src/components/Card$((i % 4)).tsx ($((20 + i * 7 % 40))ms)"
+        sleep 1.3
+      done
+
+  api:
+    command: |
+      echo "api listening on :8080"
+      i=0
+      while true; do
+        i=$((i+1))
+        case $((i % 7)) in
+          0) echo "GET  /api/orders/$((1000+i))      404   $((3 + i % 5))ms" ;;
+          3) echo "POST /api/login                  200  $((40 + i % 30))ms" ;;
+          *) echo "GET  /api/users/$((i % 50))        200   $((4 + i % 9))ms" ;;
+        esac
+        sleep 0.7
+      done
+
+  worker:
+    command: |
+      echo "worker started, polling queue 'emails'"
+      i=0
+      while true; do
+        i=$((i+1))
+        echo "job #$((4200+i)) sent welcome email to user-$((i * 37 % 900)) ($((80 + i * 13 % 120))ms)"
+        sleep 1.1
+      done
+
+  payments:
+    command: |
+      echo "payments: connecting to processor..."
+      sleep 1
+      echo "payments: connected, listening for charges"
+      sleep 3
+      echo "charge ch_$$ captured"
+      sleep 3
+      echo "ERROR: processor timeout after 3000ms" >&2
+      exit 1
+    restart: on-failure
+    max_restarts: 3
