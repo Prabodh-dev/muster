@@ -45,6 +45,10 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.5.0
+          # Skip the action's `config verify` step, which downloads a JSON
+          # schema from golangci-lint.run and times out when that is slow.
+          # golangci-lint still rejects an invalid config when it runs.
+          verify: false
 
   # Lint the platform-specific files too: the Linux run above never compiles
   # the Windows and macOS code paths.
@@ -64,6 +68,10 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.5.0
+          # Skip the action's `config verify` step, which downloads a JSON
+          # schema from golangci-lint.run and times out when that is slow.
+          # golangci-lint still rejects an invalid config when it runs.
+          verify: false
 
   # Known vulnerabilities in dependencies and in the Go standard library the
   # release binaries are built with. This uses the newest Go release (not the
